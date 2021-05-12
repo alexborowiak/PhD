@@ -57,9 +57,16 @@ class Deck:
 
     def __get_deck_root(self,institution, model, experiment, ensemble,variable):
         ROOT = f'/g/data/oi10/replicas/CMIP6/CMIP/{institution}/{model}/{experiment}/{ensemble}/' +\
-        f'Amon/{variable}/gn/'
-
-        version = os.listdir(ROOT)[0]
+        f'Amon/{variable}'
+    
+        try:
+            SUB_BIT = '/gn/'
+            version = os.listdir(ROOT + SUB_BIT)[0]
+        except:
+            SUB_BIT = '/gr/'
+            version = os.listdir(ROOT + SUB_BIT)[0]
+            
+        ROOT += SUB_BIT
 
         ROOT += version
 
