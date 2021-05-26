@@ -17,11 +17,53 @@ import os
 # grid_noise_helper
     # applies the grid_noise at each grid cell in an array.
 
+    
+    
+def climatology(hist: xr.Dataset, start = 1850, end = 1901):
+
+    ### CLIMATOLOGY
+
+    # Getting just the years for climatology. This should be for each pixel, the mean temperature
+    # from 1850 to 1900. 
+    climatology = hist.where(hist.time.dt.year.isin(np.arange(start,end)), drop = True)\
+                        .mean(dim = 'time')
+
+    return climatology
+
+
+def anomalies(data, hist):
+
+    climatology = climatology(hist)
+
+    data_resampled = data.resample(time = 'Y').mean()
+    data_anom = (data_resampled - climatology).chunk({'time':8})
+
+
+    return data_anom
+
+def space_mean(data):
+    
+        # Lat weights
+        weights = np.cos(np.deg2rad(data.lat))
+        weights.name= 'weights'
+        
+        # Calculating the weighted mean.
+        data_wmean = data.weighted(weights).mean(dim = ['lat','lon'])
+
+        return data_wmean    
+
 
 def grid_trend(x, use = [0][0]):
-    # Use = [0][0] will just return the gradient
-    # USe  = [0,1] will return the gradient and y-intercept.
     
+    
+    '''
+    Parameters
+    ----------
+    x: the y values of our trend
+    use: 
+    [0][0] will just return the gradient
+    [0,1] will return the gradient and y-intercept.
+    '''
     if all(~np.isfinite(x)):
         return np.nan
     
