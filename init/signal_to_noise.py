@@ -1,23 +1,17 @@
+''' Signal to noise
+
+This package contains all the functions needed for calculating the signal to noise of timeseries.
+
+This also included the calculatin of anomalies, which should either be moved to antoher module, or the name of 
+this package module should perhaps be renamed.
+
+'''
+
 import numpy as np
 import pandas as pd
 import xarray as xr
 import os
 
-# This package is for the vaious methods of calculating singal to noise.
-
-# grid trend:
-    # Calculates the trend at each grid cell
-
-# trend_help
-    # Applies the grid trend along an axis.
-    
-# grid_noise
-    # the lineaerly detrend noise (standard deviation)
-    
-# grid_noise_helper
-    # applies the grid_noise at each grid cell in an array.
-
-    
     
 def climatology(hist: xr.Dataset, start = 1850, end = 1901):
 
@@ -126,4 +120,47 @@ def apply_along_helper(arr, axis, func1d):
 
 
 
+
+
+def loess_filter(data: np.array, step_size = 10):
+    
+    '''
+    Applies the loess filter to a 1D numpy array.
+    
+    Parameters
+    -----------
+    data: the 1D array of values to apply the loess filter to
+    step_size: the number of steps in each of the loess filter. The default is 50 points 
+    in each window.
+    
+    Returns
+    -------
+    yhat: the data but, the loess version.
+    
+    Example
+    -------
+    >>> mean_temp = data.temp.values
+    >>> mean_temp_loess = loess_filter(mean_temp)
+    >>> 
+    >>> # The mean temperature that has been detrended using the loess method.
+    >>> mean_temp_loess_detrend = mean_temp - mean_temp_loess
+    
+    '''
+    
+    # Removign the nans (this is important as if two dataarrays where together in dataset
+    # one might have been longer than the other, leaving a trail of NaNs at the end.)
+    idy = np.isfinite(y)
+    y = y[idy]
+    
+    # The equally spaced x-values.
+    x =  np.arange(len(y))
+    
+    
+    # The fraction to consider the linear trend of each time.
+    frac = step_size/len(y)
+    
+    #yhat is the loess version of y - this is the final product.
+    yhat = lowess(y, x, frac  = frac)
+    
+    return yhat
 
