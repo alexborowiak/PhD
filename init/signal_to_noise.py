@@ -189,78 +189,6 @@ def loess_filter(y: np.array, step_size = 10):
     return yhat[:,1]
 
 
-def sn_grad_loess(data,
-                  roll_period = 60, 
-                  step_size = 60, 
-                  min_periods = 0,
-                  verbose = 0, 
-                  return_all = 0, 
-                  unit = 'y') -> xr.DataArray:
-    
-    '''
-    This function applies rolling calculatin and several of the other functions found in signal
-    to nosie: loess filer and apply_along_help with grid_trend
-    Parameters
-    ----------
-    data: xr.Dataset or xr.DataArray with one variables. Either is fine, however Dataset will
-          be converted to Dataarray.
-    roll_period: The winodw of the rolling.
-    step_size: the number of points that will go into each loess filter.
-    min_periods: this is the minimum number of points the xarray can take. If set to zero
-                 then the min_periods will be the roll_period.
-    verbose: TODO
-    return_all: returns all data calculated here. Otherwise will just return sn.
-    unit: this is the unit when shifting the time backwards for the sn. 
-    
-    '''
-    
-    # If Datatset then convert to DataArray.
-    if isinstance(data, xr.Dataset):
-        data = data.to_array()
-    
-    # If no min_periods, then min_periods is just roll_period.
-    if ~min_periods:
-        min_periods = roll_period
-    
-    # Getting the graident at each point with the rolling function. Then multipolying 
-    # by the number of points to get the signal.
-    signal = data.rolling(time = roll_period, min_periods = min_periods, center = True)\
-        .reduce(apply_along_helper, func1d = grid_trend) * roll_period
-    
-    # Loess filter
-    loess = loess_filter(data.values, step_size = step_size)
-    
-    # Detredning with the loess filer.
-    loess_detrend = data - loess
-    
-    # The noise is the rolling standard deviation of the data that has been detrended with loess.
-    noise = \
-           loess_detrend.rolling(time = roll_period, min_periods = min_periods, center = True).std()
-    
-    
-    # Signal/Noise.
-    sn = signal/noise    
-    sn.name = 'S/N'
-    
-    # This will get rid of all the NaN points on either side that arrises due to min_periods.
-    sn = sn.isel(time = slice(
-                               int((roll_period - 1)/2),
-                                -int((roll_period - 1)/2)
-                              )
-                )
-    
-    # We want the time to match what the data is (will be shifter otherwise).
-    sn['time'] = data.time.values[:len(sn.time.values)]
-
-    
-    # Sometimes a new coord can be created, so all data is returned with squeeze.
-    if return_all:
-        return sn.squeeze(), signal.squeeze(), noise.squeeze(), loess.squeeze(), loess_detrend
-    
-    return sn.squeeze()
-
-
-
 def sn_grad_loess_grid(data,
                   roll_period = 60, 
                   step_size = 60, 
@@ -294,23 +222,33 @@ def sn_grad_loess_grid(data,
     if ~min_periods:
         min_periods = roll_period
     
+    print('Calculating signal...', end = '')
+    
     # Getting the graident at each point with the rolling function. Then multipolying 
     # by the number of points to get the signal.
     signal = data.rolling(time = roll_period, min_periods = min_periods, center = True)\
         .reduce(apply_along_helper, func1d = grid_trend) * roll_period
     
+    print('Done')
+    print('Calculating loess filter...', end = '')
+    
     # Loess filter
     loess = np.apply_along_axis(loess_filter, data.get_axis_num('time'), data.values, step_size = step_size)
 #     loess = loess_filter(data.values, step_size = step_size)
     
+    print('Done')
+          
     # Detredning with the loess filer.
     loess_detrend = data - loess
     
+    print('Calculating Noise...', end='')
     # The noise is the rolling standard deviation of the data that has been detrended with loess.
     noise = \
            loess_detrend.rolling(time = roll_period, min_periods = min_periods, center = True).std()
     
-    
+    print('Done')
+
+    print('Calculating Signal to Noise with adjusttment...', end='')
     # Signal/Noise.
     sn = signal/noise    
     sn.name = 'S/N'
@@ -324,7 +262,8 @@ def sn_grad_loess_grid(data,
     
     # We want the time to match what the data is (will be shifter otherwise).
     sn['time'] = data.time.values[:len(sn.time.values)]
-
+    
+    print('Done. \n Function complete - returning output')
     
     # Sometimes a new coord can be created, so all data is returned with squeeze.
     if return_all:
