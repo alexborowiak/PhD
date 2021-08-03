@@ -9,7 +9,6 @@ class SignalToNoise:
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
         
-#     @property
     def consecutive_counter(self, bound):
         '''
         Calculates two array. The first is the start of all the instances of 
@@ -55,3 +54,6 @@ class SignalToNoise:
             arg += consec
 
         return np.array(consec_start_arg), np.array(consec_len)
+    
+    
+    
