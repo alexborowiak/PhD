@@ -1,6 +1,7 @@
 import xarray as xr
 import numpy as np
 import matplotlib.pyplot as plt
+import itertools
 import statsmodels.api as sm 
 lowess = sm.nonparametric.lowess
 
@@ -139,7 +140,6 @@ class SignalToNoise:
         
     @staticmethod    
     def loess_filter(y: np.array, step_size = 10):
-
         '''
         Applies the loess filter to a 1D numpy array.
 
@@ -179,9 +179,6 @@ class SignalToNoise:
         yhat = lowess(y, x, frac  = frac)
 
         return yhat[:,1]
-
-
-
 
     def loess_grid(self,
                       step_size = 60, 
@@ -308,7 +305,9 @@ class SignalToNoise:
         noise.name = 'noise'
         
         return noise
-        
+    
+    
+    
     @staticmethod
     def _consecutive_counter(data: np.array) -> np.array:
         '''
@@ -331,7 +330,9 @@ class SignalToNoise:
         TODO: Could this be accelerated with numba.njit???? The arrays will 
         always be of unkonw length.
         '''
-        condition = data
+
+        # Data should have nans where conditionsis not met.
+        condition = np.where(np.isfinite(data), True, False)
         #condition = data >= stable_bound
 
         consec_start_arg = []
@@ -353,12 +354,50 @@ class SignalToNoise:
 
             arg += consec
 
-        return np.array(consec_start_arg), np.array(consec_len)
-    
-    
-    
-#     def consec_counter(self, threshold, condition = ):
+        # First time stable
+        first_stable = consec_start_arg[0]
+
+        # Average lenght of period
+        average_consec_length = np.mean(consec_len)
+
+        # Total number periods
+        number_consec = len(consec_len)
+
+        # Sum of all period
+        total_consec = np.sum(consec_len)
+
+        # Fraction of total where condition is met
+        frac_total = total_consec * 100 / len(data)
+
+        return np.array([first_stable, average_consec_length,number_consec, total_consec, frac_total])
         
+    def calculate_consecutive_metrics(self):
+    
+        
+        data = self._obj
+        
+        output = np.apply_along_axis(
+                            self._consecutive_counter,
+                            data.get_axis_num('time'), 
+                            data)
+
+
+        ds = xr.zeros_like(data.isel(time=0).squeeze())
+        ds.name = 'first_stable'
+
+        ds += output[0]
+        ds = ds.to_dataset()
+
+        dims = np.array(data.dims) 
+
+        dims_sans_time = dims[dims != 'time']
+
+        ds['average_length'] = (dims_sans_time, output[1])
+        ds['number_periods'] = (dims_sans_time, output[2])
+        ds['total_time_stable'] = (dims_sans_time, output[3])
+        ds['percent_time_stable'] = (dims_sans_time, output[4])
+
+        return ds.squeeze()
         
     
 
