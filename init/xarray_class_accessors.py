@@ -309,8 +309,8 @@ class SignalToNoise:
         
         return noise
         
-
-    def consecutive_counter(data: np.array) -> np.array:
+    @staticmethod
+    def _consecutive_counter(data: np.array) -> np.array:
         '''
         Calculates two array. The first is the start of all the instances of 
         exceeding a threshold. The other is the consecutive length that the 
@@ -357,6 +357,8 @@ class SignalToNoise:
     
     
     
-    
+#     def consec_counter(self, threshold, condition = ):
+        
+        
     
 
