@@ -6,6 +6,17 @@ import statsmodels.api as sm
 lowess = sm.nonparametric.lowess
 
 
+def dask_percentile(array, axis, q):
+    array = array.rechunk({axis: -1})
+    return array.map_blocks(
+        np.percentile,
+        axis=axis,
+        q=q,
+        dtype=array.dtype,
+        drop_axis=axis)
+
+
+
 @xr.register_dataarray_accessor('correct_data')
 class CorrectData:
     
@@ -127,8 +138,11 @@ class ClimatologyFunction:
         # Calculating the weighted mean.
         data_wmean = data.weighted(weights).mean(dim = ['lat','lon'])
         
-        return data_wmean    
+        return data_wmean
     
+    
+
+
     
     
 @xr.register_dataarray_accessor('sn')
