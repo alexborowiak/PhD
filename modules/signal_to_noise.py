@@ -268,7 +268,7 @@ def sn_grad_loess_grid(data,
     
     # Loess filter
     loess = np.apply_along_axis(loess_filter, data.get_axis_num('time'), data.values, step_size = step_size)
-#     loess = loess_filter(data.values, step_size = step_size)
+    # loess = loess_filter(data.values, step_size = step_size)
     
     print('Done')
           

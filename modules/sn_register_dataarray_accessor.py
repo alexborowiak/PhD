@@ -54,6 +54,6 @@ class SignalToNoise:
             arg += consec
 
         return np.array(consec_start_arg), np.array(consec_len)
+
     
-    
-    
+
