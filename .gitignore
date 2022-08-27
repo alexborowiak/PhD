@@ -1,4 +1,7 @@
 .gif
 .nc
 .txt
-.ipynb_checkoutpoints
+.ipynb_checkpoints
+.pyc
+.pyc
+__pycache__/

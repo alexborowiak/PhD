@@ -1,36 +1,19 @@
+# +
 import xarray as xr
 import numpy as np
 import matplotlib.pyplot as plt
 import itertools
+import xarray_extender as xce
+import signal_to_noise as sn
+import signal_to_noise as sn
+
 import statsmodels.api as sm 
 lowess = sm.nonparametric.lowess
+# -
 
-
-def dask_percentile(array: np.ndarray, axis: str, q: float):
-    '''
-    Applies np.percetnile in dask across an axis
-    Parameters:
-    -----------
-    array: the data to apply along
-    axis: the dimension to be applied along
-    q: the percentile
-    
-    Returns:
-    --------
-    qth percentile of array along axis
-    
-    Example
-    -------
-    xr.Dataset.data.reduce(xca.dask_percentile,dim='time', q=90)
-    '''
-    array = array.rechunk({axis: -1})
-    return array.map_blocks(
-        np.percentile,
-        axis=axis,
-        q=q,
-        dtype=array.dtype,
-        drop_axis=axis)
-
+import logging, sys
+logging.basicConfig(format="%(message)s", filemode='w', stream=sys.stdout)
+logger = logging.getLogger()
 
 
 @xr.register_dataarray_accessor('correct_data')
@@ -203,6 +186,9 @@ class SignalToNoise:
 
         # The fraction to consider the linear trend of each time.
         frac = step_size/len(y)
+        # The fraction is just the whole length of y
+        # frac = 1#len(y)
+    
 
         #yhat is the loess version of y - this is the final product.
         yhat = lowess(y, x, frac  = frac)
@@ -216,9 +202,14 @@ class SignalToNoise:
         '''Applies the loess filter static method to an array through time'''
         
         data = self._obj
+        
+        # (25th March) The loess filter will do this automatically and will cause dim 
+        # mismatch if not added here. 
+        data = data.dropna(dim='time')
        
         # Loess filter
-        loess = np.apply_along_axis(self.loess_filter, data.get_axis_num('time'), data.values, step_size = step_size)
+        loess = np.apply_along_axis(self.loess_filter, data.get_axis_num('time'), data.values,
+                                    step_size = step_size)
 
         # Detredning with the loess filer.
         loess_detrend = data - loess
@@ -361,6 +352,10 @@ class SignalToNoise:
         '''
 
         # Data should have nans where conditionsis not met.
+        if all(np.isnan(data)):
+            logger.debug('All are nan values - returning nan values')
+            return np.array([np.nan] * 5)
+            
         condition = np.where(np.isfinite(data), True, False)
         #condition = data >= stable_bound
 
@@ -375,8 +370,8 @@ class SignalToNoise:
         #[True, True, True, False, True, False, True, True] will have the groups that will be accepted 
         # by 'if key':
         #[[True, True, True], [True], [True, True]]
+#         print(data)
         for key, group in itertools.groupby(condition):
-
             # Consec needs to be defined here for the arg
             consec = len(list(group))
             
@@ -401,36 +396,218 @@ class SignalToNoise:
 
         # Fraction of total where condition is met
         frac_total = total_consec * 100 / len(data)
-
+        
         return np.array([first_stable, average_consec_length,number_consec, total_consec, frac_total])
         
-    def calculate_consecutive_metrics(self):
+    def calculate_consecutive_metrics(self, logginglevel='INFO'):
     
+        eval(f'logging.getLogger().setLevel(logging.{logginglevel})')
         
         data = self._obj
         
+        # Applying the consecitve_counter function along the time axis.
         output = np.apply_along_axis(
                             self._consecutive_counter,
                             data.get_axis_num('time'), 
                             data)
 
-
+        print(f'New data has shape {output.shape}')
+        # Creating an exmpty dataset with no time dimension
         ds = xr.zeros_like(data.isel(time=0).squeeze())
+        
+        # Adding in the first dimension to the dataset
         ds.name = 'first_stable'
-
+        
+        # Output is an array of arrays. Adding the first elemtn
         ds += output[0]
+        
+        # Converting to dataset so other data vars can be added.
         ds = ds.to_dataset()
-
+        
+        
+        # The dims data should have
         dims = np.array(data.dims) 
-
+        
+        # Data has been reduced along time dimension. Don't want time.
         dims_sans_time = dims[dims != 'time']
-
+        
+        # Adding all other variables
         ds['average_length'] = (dims_sans_time, output[1])
         ds['number_periods'] = (dims_sans_time, output[2])
         ds['total_time_stable'] = (dims_sans_time, output[3])
         ds['percent_time_stable'] = (dims_sans_time, output[4])
+        
+        
+        # Adding long names
+        ds.first_stable.attrs = {"long_name": "** First Year Stable", 'units':'year'}
+        ds.average_length.attrs = {"long_name": "** Average Length of Stable Periods", 'units':'year'}
+        ds.number_periods.attrs = {"long_name": "** Number of Different Stable Periods", 'units':''}
+        ds.percent_time_stable.attrs = {"long_name": "** Percent of Time Stable", 'units':'%'}
 
         return ds.squeeze()
 
-    
 
+@xr.register_dataset_accessor('clima_ds')
+class ClimatologyFunctionDataSet:
+    '''All the above accessors are all for data arrays. This will apply the above methods
+    to data sets'''
+    def __init__(self, xarray_obj):
+        self._obj = xarray_obj    
+        
+    def space_mean(self):
+        data = self._obj
+        data_vars = list(data.data_vars)
+    
+        return xr.merge([data[dvar].clima.space_mean() for dvar in data_vars])
+    
+    def anomalies(self, historical_ds: xr.Dataset) -> xr.Dataset:
+        
+        ds = self._obj
+        
+        # The data vars in each of the datasets
+        data_vars = list(ds.data_vars)
+        hist_vars = list(historical_ds.data_vars)
+        
+        # Looping through all data_vars and calculating the anomlies
+        to_merge = []
+        for dvar in data_vars:
+            print(f'{dvar}, ', end='')
+            # Var not found in historical.
+            if dvar not in hist_vars:
+                print(f'{dvar} is not in historiocal dataset - anomalies cannot be calculated')
+            else:
+                # Extracing the single model.
+                da = ds[dvar]
+                historical_da = historical_ds[dvar]
+                
+                # Calculating anomalies
+                start = historical_da.time.dt.year.values[0]
+                end = historical_da.time.dt.year.values[-1]
+                anoma_da = da.clima.anomalies(start = start, end = end, historical = historical_da)
+
+                to_merge.append(anoma_da)
+            
+        return xr.merge(to_merge, compat='override')
+    
+    
+    def sn_multiwindow(self, historical_ds: xr.Dataset, start_window = 20, end_window = 40, step_window = 5
+                      ,logginglevel='ERROR'):
+        
+        
+        '''Loops through all of the data vars in an xarray dataset.'''
+        
+        
+        ds = self._obj
+        
+        # The data vars in each of the datasets
+        data_vars = list(ds.data_vars)
+        hist_vars = list(historical_ds.data_vars)
+
+        stable_sn_dict = {}
+        unstable_sn_dict = {}
+
+        for dvar in data_vars:
+            print(f'\n{dvar}')
+
+            # Making sure it doesn't fail
+            try:
+                da = ds[dvar].dropna(dim='time')
+                da_hist = historical_ds[dvar].dropna(dim='time')
+                unstable_sn_da , stable_sn_da  = sn.sn_multi_window(
+                                        da, 
+                                        da_hist, 
+                                        start_window = start_window,
+                                        end_window=end_window, step_window=step_window,
+                                        logginglevel=logginglevel)
+
+                # Storing the values as a dictionary and not concating for now.
+                stable_sn_dict[dvar] = stable_sn_da
+                unstable_sn_dict[dvar] = unstable_sn_da
+
+            # If there is a value error, document this and move on.
+            except:
+                print(f'!!!!!!!!!!!!!!!!!!!!!!\n\n\n{dvar} has error \n {da} \n {da_hist}\n\n\n!!!!!!!!!!!!!!!!!!!!!!')
+                    
+        stable_sn_ds = xce.xr_dict_to_xr_dataset(stable_sn_dict)
+        unstable_sn_ds = xce.xr_dict_to_xr_dataset(unstable_sn_dict)
+                         
+        return stable_sn_ds, unstable_sn_ds
+
+
+
+# +
+# @xr.register_dataarray_accessor('clima')
+# class ClimatologyFunction:
+    
+#     def __init__(self, xarray_obj):
+#         self._obj = xarray_obj
+        
+#     def climatology(self, start = 1850, end = 1901):
+#         '''
+#         CLIMATOLOGY
+#         Getting just the years for climatology. This should be for each pixel, the mean temperature
+#         from 1850 to 1900.
+
+#         Parameters
+#         ----------
+#         hist: xarray dataset with dimension time
+#         start: float/int of the start year.
+#         end: float/ind of the end year
+
+#         Returns:
+#         climatologyL xarray dataset with the mean of the time dimension for just the years from 
+#         start to end. Still contains all other dimensions (e.g. lat and lon) if passed in.
+
+#         '''
+#         data = self._obj
+#         climatology = data.where(data.time.dt.year.isin(np.arange(start,end)), drop = True)\
+#                             .mean(dim = 'time')
+
+#         return climatology
+    
+    
+    
+#     # TODO: Need kwargs for this.
+#     def anomalies(self, start = 1850, end = 1901, **kwargs): # hist
+
+#         data = self._obj
+        
+        
+#         if 'historical' in kwargs:
+#             print('Using historical dataset')
+#             climatology = kwargs['historical'].clima.climatology(start = start, end = end)
+            
+#         else:
+#             climatology = data.clima.climatology(start = start, end = end)
+
+#         data_anom = (data - climatology).chunk({'time':8})
+    
+#         if 'debug' in kwargs:
+#             return data_anom, climatology
+
+#         return data_anom
+
+#     def space_mean(self):
+#         '''
+#         When calculating the space mean, the mean needs to be weighted by latitude.
+
+#         Parameters
+#         ----------
+#         data: xr.Dataset with both lat and lon dimension
+
+#         Returns
+#         -------
+#         xr.Dataset that has has the weighted space mean applied.
+
+#         '''
+
+#         data = self._obj
+
+#         # Lat weights
+#         weights = np.cos(np.deg2rad(data.lat))
+#         weights.name = 'weights'
+
+#         # Calculating the weighted mean.
+#         data_wmean = data.weighted(weights).mean(dim = ['lat','lon'])
+        
+#         return data_wmean
