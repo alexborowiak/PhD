@@ -9,11 +9,10 @@ import signal_to_noise as sn
 
 import statsmodels.api as sm 
 lowess = sm.nonparametric.lowess
-# -
 
-import logging, sys
-logging.basicConfig(format="%(message)s", filemode='w', stream=sys.stdout)
-logger = logging.getLogger()
+
+import utils
+logger = utils.get_notebook_logger()
 
 
 @xr.register_dataarray_accessor('correct_data')
@@ -68,7 +67,7 @@ class ClimatologyFunction:
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
         
-    def climatology(self, start = None, end = None):
+    def climatology(self, start = None, end = None,logginglevel='ERROR'):
         '''
         CLIMATOLOGY
         Getting just the years for climatology. This should be for each pixel, the mean temperature
@@ -85,11 +84,14 @@ class ClimatologyFunction:
         start to end. Still contains all other dimensions (e.g. lat and lon) if passed in.
 
         '''
+        utils.change_logging_level(logginglevel)
+        
+        logger.info('Calculating Climatology')
+        
         data = self._obj
-
-           
-        # Just get the values in the start and end years.
+         
         if start and end:
+            logger.debug('Using custom start and end points')
             data = data.where(data.time.dt.year.isin(np.arange(start,end)), drop = True)
             
         climatology = data.mean(dim = 'time')
@@ -98,26 +100,30 @@ class ClimatologyFunction:
     
     
     
-    # TODO: Need kwargs for this.
-    def anomalies(self, historical: xr.DataArray,
-                  start:int = None, end:int = None):
+    def anomalies(self, historical: xr.DataArray=None,
+                  start:int = None, end:int = None,logginglevel='ERROR'):
+        utils.change_logging_level(logginglevel)
+                    
+        logger.info('Calculating anomalies')
 
         data = self._obj
         
         
         if isinstance(historical, xr.DataArray):
-            print('Using historical dataset')
+            logger.debug('Using historical dataset')
             climatology = historical.clima.climatology(start = start, end = end)
             
         else:
+            logger.debug('Anomallies from self mean')
             climatology = data.clima.climatology(start = start, end = end)
-
+    
+        logger.debug('Subtracting the clilamtology from data')
         data_anom = (data - climatology)
     
 
         return data_anom
 
-    def space_mean(self):
+    def space_mean(self,logginglevel='ERROR'):
         '''
         When calculating the space mean, the mean needs to be weighted by latitude.
 
@@ -130,6 +136,9 @@ class ClimatologyFunction:
         xr.Dataset that has has the weighted space mean applied.
 
         '''
+        utils.change_logging_level(logginglevel)
+
+        logger.info('Calculating the weighted mean for lat and lon. ')
 
         data = self._obj
 
@@ -157,7 +166,7 @@ class SignalToNoise:
         self._obj = xarray_obj
         
     @staticmethod    
-    def loess_filter(y: np.array, step_size = 60):
+    def loess_filter(y: np.array, window = 60,logginglevel='ERROR'):
         '''
         Applies the loess filter to a 1D numpy array.
 
@@ -181,41 +190,32 @@ class SignalToNoise:
 
         '''
 
-        # Removign the nans (this is important as if two dataarrays where together in dataset
-        # one might have been longer than the other, leaving a trail of NaNs at the end.)
+        # Removign the nans
         idy = np.isfinite(y)
         y = y[idy]
 
         # The equally spaced x-values.
         x =  np.arange(len(y))
 
-
         # The fraction to consider the linear trend of each time.
-        frac = step_size/len(y)
-        # The fraction is just the whole length of y
-        # frac = 1#len(y)
-    
+        frac = window/len(y)
 
         #yhat is the loess version of y - this is the final product.
         yhat = lowess(y, x, frac  = frac)
 
         return yhat[:,1]
 
-    def loess_grid(self,
-                      step_size = 60, 
-                      min_periods = 0) -> xr.DataArray:
+    def apply_loess_filter(self, window = 60, min_periods = 0) -> xr.DataArray:
         
         '''Applies the loess filter static method to an array through time'''
-        
+                                             
         data = self._obj
         
-        # (25th March) The loess filter will do this automatically and will cause dim 
-        # mismatch if not added here. 
         data = data.dropna(dim='time')
-       
+           
         # Loess filter
         loess = np.apply_along_axis(self.loess_filter, data.get_axis_num('time'), data.values,
-                                    step_size = step_size)
+                                    window = window)
 
         # Detredning with the loess filer.
         loess_detrend = data - loess
@@ -225,7 +225,7 @@ class SignalToNoise:
     
     
     @staticmethod
-    def _grid_trend(x, use = [0][0]):
+    def trend_line(x, use = [0][0]):
         '''
         Parameters
         ----------
@@ -233,11 +233,11 @@ class SignalToNoise:
         use: 
         [0][0] will just return the gradient
         [0,1] will return the gradient and y-intercept.
+        Previosly: _grid_trend
         '''
         if all(~np.isfinite(x)):
             return np.nan
 
-        # If every point is just a nan values. We don't want to do the polyfit calculation. Just return nan
         t = np.arange(len(x))
 
         # Getting the gradient of a linear interpolation
@@ -253,7 +253,7 @@ class SignalToNoise:
         return poly[use]
     
     @staticmethod
-    def _apply_along_helper(arr, axis, func1d):
+    def _apply_along_helper(arr, axis, func1d,logginglevel='ERROR'):
         '''
         Parameters
         -------
@@ -271,16 +271,17 @@ class SignalToNoise:
         return np.apply_along_axis(func1d, axis[0], arr)
     
     
-    def adjust_time_from_rolling(self, roll_period):
+    def adjust_time_from_rolling(self, window, logginglevel='ERROR'):
         
+        utils.change_logging_level(logginglevel)
+              
         data = self._obj
+        
+        time_adjsut_value = int((window - 1)/2)
+        logger.info(f'Adjusting time points by {time_adjsut_value}')
 
         # This will get rid of all the NaN points on either side that arrises due to min_periods.
-        data_adjusted = data.isel(time = slice(
-                                   int((roll_period - 1)/2),
-                                    -int((roll_period - 1)/2)
-                                  )
-                    )
+        data_adjusted = data.isel(time = slice(time_adjsut_value,-time_adjsut_value))
 
         # We want the time to match what the data is (will be shifter otherwise).
         data_adjusted['time'] = data.time.values[:len(data_adjusted.time.values)]
@@ -288,54 +289,78 @@ class SignalToNoise:
         return data_adjusted
     
     
-    def signal_grad(self,
-                      roll_period = 61, 
-                      min_periods = 0) -> xr.DataArray:
+    def calculate_rolling_signal(self, window:int = 61, min_periods:int = 0, logginglevel='ERROR') -> xr.DataArray:
+        '''
+        Previosuly signal_grad
+        '''
+        
+        utils.change_logging_level(logginglevel)
 
-        '''
-        '''
+        logger.info("Calculting the rolling signal")
+        
         data = self._obj
         
         # If no min_periods, then min_periods is just roll_period.
         if ~min_periods:
-            min_periods = roll_period
+            min_periods = window
 
 
-        # Getting the graident at each point with the rolling function. Then multipolying 
-        # by the number of points to get the signal.
-        signal = data.rolling(time = roll_period, min_periods = min_periods, center = True)\
-            .reduce(self._apply_along_helper, func1d = self._grid_trend) * roll_period
+        # Rolling gradient * window
+        signal = data.rolling(time = window, min_periods = min_periods, center = True)\
+            .reduce(self._apply_along_helper, func1d = self.trend_line) * window
     
-        signal = signal.sn.adjust_time_from_rolling(roll_period = roll_period)
+        signal = signal.sn.adjust_time_from_rolling(window = window, logginglevel=logginglevel)
     
         signal.name = 'signal'
     
         return signal
 
     
-    def noise_grad(self,
-                      roll_period = 61, 
-                      min_periods = 0) -> xr.DataArray:
+    def calculate_rolling_noise(self, window = 61, min_periods = 0,logginglevel='ERROR') -> xr.DataArray:
         
+        utils.change_logging_level(logginglevel)
+
+        logger.info("Calculting the rolling noise")
+
         data = self._obj
         
         # If no min_periods, then min_periods is just roll_period.
         if ~min_periods:
-            min_periods = roll_period
+            min_periods = window
         
+        # Rolling standard deviation
         noise = \
-           data.rolling(time = roll_period, min_periods = min_periods, center = True).std()
+           data.rolling(time = window, min_periods = min_periods, center = True).std()
             
-        noise = noise.sn.adjust_time_from_rolling(roll_period = roll_period) 
+        noise = noise.sn.adjust_time_from_rolling(window = window, logginglevel=logginglevel) 
         
         noise.name = 'noise'
         
         return noise
     
+ 
     
+    def sn_multiwindow(self, historical_da: xr.Dataset, start_window = 20, end_window = 40, step_window = 5
+                      , logginglevel='ERROR'):
+        '''Loops through all of the data vars in an xarray dataset.'''
+        
+        
+        da = self._obj
+
+        unstable_sn_da , stable_sn_da  = sn.sn_multi_window(
+                                        da, 
+                                        historical_da, 
+                                        start_window = start_window,
+                                        end_window=end_window, step_window=step_window,
+                                        logginglevel=logginglevel)
+                   
+                         
+        return unstable_sn_da , stable_sn_da
+                    
+       
     
     @staticmethod
-    def _consecutive_counter(data: np.array) -> np.array:
+    def _consecutive_counter(data: np.array,logginglevel='ERROR') -> np.array:
         '''
         Calculates two array. The first is the start of all the instances of 
         exceeding a threshold. The other is the consecutive length that the 
@@ -376,7 +401,6 @@ class SignalToNoise:
         #[True, True, True, False, True, False, True, True] will have the groups that will be accepted 
         # by 'if key':
         #[[True, True, True], [True], [True, True]]
-#         print(data)
         for key, group in itertools.groupby(condition):
             # Consec needs to be defined here for the arg
             consec = len(list(group))
@@ -405,7 +429,7 @@ class SignalToNoise:
         
         return np.array([first_stable, average_consec_length,number_consec, total_consec, frac_total])
         
-    def calculate_consecutive_metrics(self, logginglevel='INFO'):
+    def calculate_consecutive_metrics(self, logginglevel='ERROR'):
     
         eval(f'logging.getLogger().setLevel(logging.{logginglevel})')
         
@@ -454,25 +478,6 @@ class SignalToNoise:
     
     
     
-    def sn_multiwindow(self, historical_da: xr.Dataset, start_window = 20, end_window = 40, step_window = 5
-                      ,logginglevel='ERROR'):
-        '''Loops through all of the data vars in an xarray dataset.'''
-        
-        
-        da = self._obj
-
-        unstable_sn_da , stable_sn_da  = sn.sn_multi_window(
-                                        da, 
-                                        historical_da, 
-                                        start_window = start_window,
-                                        end_window=end_window, step_window=step_window,
-                                        logginglevel=logginglevel)
-                   
-                         
-        return unstable_sn_da , stable_sn_da
-    
-    
-    
     
 
 
@@ -489,7 +494,7 @@ class ClimatologyFunctionDataSet:
     
         return xr.merge([data[dvar].clima.space_mean() for dvar in data_vars])
     
-    def anomalies(self, historical_ds: xr.Dataset) -> xr.Dataset:
+    def anomalies(self, historical_ds: xr.Dataset,logginglevel='ERROR') -> xr.Dataset:
         
         ds = self._obj
         
@@ -509,11 +514,7 @@ class ClimatologyFunctionDataSet:
                 da = ds[dvar]
                 historical_da = historical_ds[dvar]
                 
-#                 # Calculating anomalies
-#                 start = historical_da.time.dt.year.values[0]
-#                 end = historical_da.time.dt.year.values[-1]
                 anoma_da = da.clima.anomalies(historical_da)
-#                 anoma_da = da.clima.anomalies(start = start, end = end, historical = historical_da)
 
                 to_merge.append(anoma_da)
             
@@ -531,12 +532,13 @@ class SignalToNoiseDS:
         self._obj = xarray_obj    
         
     def sn_multiwindow(self, historical_ds: xr.Dataset, start_window = 20, end_window = 40, step_window = 5
-                      ,logginglevel='ERROR'):
+                      , logginglevel='ERROR'):
         
         
         '''Loops through all of the data vars in an xarray dataset.'''
         
-        
+        utils.change_logging_level(logginglevel)
+
         ds = self._obj
         
         # The data vars in each of the datasets
@@ -547,7 +549,7 @@ class SignalToNoiseDS:
         unstable_sn_dict = {}
 
         for dvar in data_vars:
-            print(f'\n{dvar}')
+            logger.error(dvar)
 
             # Making sure it doesn't fail
             try:
@@ -558,7 +560,8 @@ class SignalToNoiseDS:
                                         da_hist, 
                                         start_window = start_window,
                                         end_window=end_window, step_window=step_window,
-                                        logginglevel=logginglevel)
+                                        logginglevel='ERROR' # DOn't want this to log. Is too much
+                )
                 
                 # Storing the values as a dictionary and not concating for now.
                 stable_sn_dict[dvar] = stable_sn_ds['signal_to_noise']
@@ -566,7 +569,7 @@ class SignalToNoiseDS:
 
             # If there is a value error, document this and move on.
             except:
-                print(f'!!!!!!!!!!!!!!!!!!!!!!\n\n\n{dvar} has error \n {da} \n {da_hist}\n\n\n!!!!!!!!!!!!!!!!!!!!!!')
+                logger.error(f'!!!!!!!!!!!!!!!!!!!!!!\n\n\n{dvar} has error \n {da} \n {da_hist}\n\n\n!!!!!!!!!!!!!!!!!!!!!!')
              
         stable_sn_ds = xce.xr_dict_to_xr_dataset(stable_sn_dict)
         unstable_sn_ds = xce.xr_dict_to_xr_dataset(unstable_sn_dict)

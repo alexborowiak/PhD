@@ -24,17 +24,9 @@ from typing import List
 import statsmodels.api as sm 
 lowess = sm.nonparametric.lowess
 
-# +
-import logging
-LOG_FORMAT = "%(message)s"
-logging.basicConfig(format=LOG_FORMAT, filemode='w')
-logger = logging.getLogger()
-
-# Making the log message appear as a print statements rather than in the jupyter cells
-logger.handlers[0].stream = sys.stdout
+logger = utils.get_notebook_logger()
 
 
-# -
 
 def dask_percentile(array: np.ndarray, axis: str, q: float):
     '''
@@ -73,12 +65,44 @@ def add_lower_upper_to_dataset(da: xr.DataArray, lower: xr.DataArray, upper:xr.D
     return ds
 
 
+
+def calculate_upper_and_lower_bounds(ds: xr.Dataset, lower_bound:float = 1, upper_bound: float = 99, 
+                                    logginglevel='ERROR'):
+    
+    utils.change_logging_level(logginglevel)
+    logger.info(f'Calculating Upper and lower control bounds')
+   
+    try:
+        control__ubound = ds.reduce(xe.dask_percentile,dim='time', q=upper_bound)
+        control__lbound = ds.reduce(xe.dask_percentile,dim='time', q=lower_bound) 
+        logger.info('Map blocks used')
+    
+    except AttributeError as e:
+        control__ubound = ds.reduce(np.nanpercentile,dim='time', q=upper_bound)
+        control__lbound = ds.reduce(np.nanpercentile,dim='time', q=lower_bound)
+        logger.info('np.nanpercentile used')
+        
+    logger.debug(f'{control__lbound.values}  - {control__ubound.values}')
+    return (control__lbound, control__ubound)
+
+
+
+
+def get_ds_above_below_and_between_bounds(da: xr.DataArray, da_sn: xr.DataArray, 
+                                          control__lbound: xr.DataArray, control__ubound: xr.DataArray) -> xr.DataArray:
+    
+    da_stable = da.where(np.logical_and(da_sn <= control__ubound,da_sn >= control__lbound))
+    da_increasing = da.where(da_sn >= control__ubound )
+    da_decreasing = da.where(da_sn <= control__lbound )
+    
+    return (da_stable, da_increasing, da_decreasing)
+
+
 def global_sn(
-    da: xr.DataArray, 
-    control: xr.DataArray,
+    da: xr.DataArray,  control: xr.DataArray,
     da_loess: Optional[xr.DataArray] = None,
     control_loess: Optional[xr.DataArray] = None,
-    window = 61, return_all = False,logginglevel='ERROR')-> xr.Dataset:
+    window = 61, return_all = False, logginglevel='ERROR')-> xr.Dataset:
     '''
     Calculates the signal to noise for an array da, based upon the control.
     
@@ -112,94 +136,34 @@ def global_sn(
 
     '''
     
-    # Chaninging the logging level so that the info can be displayed if required.
-    eval(f'logging.getLogger().setLevel(logging.{logginglevel})')
-
+    utils.change_logging_level(logginglevel)
+    logger.info('Calculating signal to noise')
     
-    logger.debug(f'- Input files\nda\n{da}\ncontrol\n{control}')
 
-    #### Control
-    
-    
-    # Singal
-    logger.info('- Calculating control signal...')
-    control_signal = control.sn.signal_grad(roll_period = window)
-    logger.debug(f'\n{control_signal}')
-
-    # Noise
     if control_loess is None:
-        logger.info(f'- control_loess not provided. Calculating control noise')
-        control_loess = control.sn.loess_grid()
-        logger.debug(f'\n{control_loess}')
-
-    control_noise = control_loess.sn.noise_grad(roll_period = window)
-
-    # Signal to Noise
-    logger.info(f'Calculating control signal to noise')
-    control_sn = control_signal/control_noise
-    logger.debug(f'\n{control_sn}')
-
-    # The upper and lower bounds of what is stable.
-    # TODO: Don't want to use max
-    logger.info(f'- Upper and lower control bounds')
-    
-    
-    # PHD-10
-    # The bounds of what can be considered an increasing (90th percentile)
-    # and a decreasing trend (10th percentile).
-    try:
-        control__ubound = control_sn.reduce(xe.dask_percentile,dim='time', q=99) #xe.dask_percentile
-        control__lbound = control_sn.reduce(xe.dask_percentile,dim='time', q=1) 
-        logger.info('Map blocks')
-    
-    # TODO: Sometimes will end up with numpy array instead of dask array, not sure
-    # why. 
-    except AttributeError as e:
-        control__ubound = control_sn.reduce(np.nanpercentile,dim='time', q=99)
-        control__lbound = control_sn.reduce(np.nanpercentile,dim='time', q=1)
-        logger.info('np.nanpercentile')
-    logger.debug(f'{control__lbound.values}  - {control__ubound.values}')
-
-
-    ### Da
-    logger.debug(f'- Experiment (da) file\n{da}')
-    logger.info(f'- da signal')
-    da_signal = da.sn.signal_grad(roll_period = window)
-    logger.debug(f'{da_signal}')
-    logger.info('- da loess')
-    
-    if da_loess is None:
-        logger.debug(f'- da_loess not provided. Calculating control noise')
-        da_loess = da.sn.loess_grid()
+        logger.info(f'- control_loess not provided.')
+        control_loess = control.sn.apply_loess_filter()
         
-    logger.info(f'{da_loess}')
-    logger.debug(f'- da noise')
-    da_noise = da_loess.sn.noise_grad(roll_period = window)
-    logger.debug(f'{da_noise}')
-    logger.info('- da signal to noise')
+    control_signal = control.sn.calculate_rolling_signal(window = window, logginglevel=logginglevel)
+    control_noise = control_loess.sn.calculate_rolling_noise(window = window, logginglevel=logginglevel)
+    control_sn = control_signal/control_noise
+    control__lbound, control__ubound = calculate_upper_and_lower_bounds(control_sn)
+
+
+    if da_loess is None:
+        logger.debug(f'- da_loess not provided')
+        da_loess = da.sn.apply_loess_filter()
+        
+        
+    da_signal = da.sn.calculate_rolling_signal(window = window, logginglevel=logginglevel)
+    da_noise = da_loess.sn.calculate_rolling_noise(window = window, logginglevel=logginglevel)
     da_sn = da_signal/da_noise
-    logger.debug(f'{da_sn}')
 
 
-    # TEMP
-    # The global temperature anomalies that are stable
-    da_stable = da.where(np.logical_and(da_sn <= control__ubound,da_sn >= control__lbound))
-    # Increasing temperature
-    da_increasing = da.where(da_sn >= control__ubound )
-    # Decreasing temperature.
-    da_decreasing = da.where(da_sn <= control__lbound )
-
-    # SN
-    # The global signal-to-noise points that are stable
-    da_sn_stable = da_sn.where(
-        np.logical_and(da_sn <= control__ubound,da_sn >= control__lbound ))
-    # Increasing temperature S/N
-    da_sn_increasing = da_sn.where(da_sn >= control__ubound )
-    # Decreasing temperature S/N
-    da_sn_decreasing = da_sn.where(da_sn <= control__lbound )
+    da_sn_stable, da_sn_increasing, da_sn_decreasing = \
+                        get_ds_above_below_and_between_bounds(da_sn, da_sn, control__lbound, control__ubound)
     
     
-    # Convering to dataset and adding lower and upper bounds as variable
     ds_sn = add_lower_upper_to_dataset(da_sn, control__lbound, control__ubound)
     ds_sn_stable = add_lower_upper_to_dataset(da_sn_stable, control__lbound, control__ubound)
     ds_sn_increasing = add_lower_upper_to_dataset(da_sn_increasing, control__lbound, control__ubound)
@@ -207,17 +171,17 @@ def global_sn(
 
     
     if return_all:
+        
+        da_stable, da_increasing, da_decreasing = \
+                        get_ds_above_below_and_between_bounds(da, da_sn, control__lbound, control__ubound)
         return (da_stable, da_increasing, da_decreasing, 
                 ds_sn, ds_sn_stable, ds_sn_increasing, ds_sn_decreasing, 
                 control__lbound, control__ubound)
 
     return ds_sn, ds_sn_stable, ds_sn_increasing, ds_sn_decreasing
 
-# TECH DEBT: THe global mean version works for versions with lat and lon coords. Can remove this version
 global_mean_sn = global_sn
 
-
-# +
 
 def sn_multi_window(da, control_da, start_window = 21, end_window = 221, step_window = 8,
                   logginglevel='ERROR'):
@@ -235,19 +199,20 @@ def sn_multi_window(da, control_da, start_window = 21, end_window = 221, step_wi
     -------
     unstable_sn_multi_window_da , stable_sn_multi_window_da  Both these data sets contian dimension of time and window.
     '''
+    utils.change_logging_level(logginglevel)
     
     decreasing_sn_array = []
     increasing_sn_array = []
     stable_array = []
-
+    
     windows = range(start_window, end_window,step_window)
     
-    print(f'Starting window loop from {start_window} to {end_window} with step size of {step_window}')
+    print(f'{start_window=}, {end_window=}, {step_window=}')
     # Looping through
     for window in windows:
 
         print(f'{window}, ', end='')
-        da_sn, da_sn_stable, da_sn_increasing, da_sn_decreasing = global_mean_sn(da, control_da,window = window,
+        da_sn, da_sn_stable, da_sn_increasing, da_sn_decreasing = global_mean_sn(da, control_da, window = window,
                                                                                 logginglevel=logginglevel)
         
         increasing_sn_array.append(da_sn_increasing)
@@ -265,14 +230,9 @@ def sn_multi_window(da, control_da, start_window = 21, end_window = 221, step_wi
     
 
     unstable_sn_multi_window_da  = increasing_sn_multi_window_ds.fillna(0) + decreasing_sn_multi_window_ds.fillna(0)
-
     unstable_sn_multi_window_da  = xr.where(unstable_sn_multi_window_da  != 0, unstable_sn_multi_window_da , np.nan)
     
-    # Converting the time stamp to year.
-    # TODO: Is this needed, it makes calculating with other things tricky as the timestamp has now
-    # changed. 
     unstable_sn_multi_window_da['time'] = unstable_sn_multi_window_da.time.dt.year.values
-#     unstable_sn_multi_window_da.name = 'SN'
     
     
     stable_sn_multi_window_da  = xr.where(np.isfinite(unstable_sn_multi_window_da ), 1, 0)

@@ -1,9 +1,3 @@
-'''
-Standardising the format of all data. 
-
-'''
-
-
 import numpy as np
 import pandas as pd
 import xarray as xr
@@ -13,7 +7,11 @@ import os
 from glob import glob
 import constants
 import json
+from enum import Enum
+from classes import ExperimentTypes, LongRunMIPError
 
+import utils
+logger = utils.get_notebook_logger()
 
 def open_dataset(fpath: str) -> xr.Dataset:
     '''
@@ -36,8 +34,85 @@ def open_dataset(fpath: str) -> xr.Dataset:
 #     return ds
 
 
-def read_and_merge_netcdfs(fnames: List[str], ROOT_DIR: str = '',
-                           var:str ='tas', model_index:int = 2, verbose=False) -> xr.Dataset:
+def convert_units(ds: xr.Dataset, variable: str, logginglevel='ERROR'):
+    utils.change_logging_level(logginglevel)
+    SECONDS_IN_YEAR = 365 * 24 * 60 * 60
+    if variable == 'tas':
+        logger.info('Converting from Kelvin to C')
+        return ds-273.15
+    if variable == 'pr':
+        logger.info('Converting from per second to yearly total')
+        ds = ds * SECONDS_IN_YEAR
+        return ds
+    return ds
+    
+    
+
+
+def get_requested_length(fname: str):
+    if 'control' in fname:
+        return 100
+    return 800
+
+
+def read_longrunmip_netcdf(fname: str, ROOT_DIR: str = '',
+                           var:str = None, model_index:int = 2, 
+                           requested_length:int=None, max_length: int = 1200,
+                           chunks = {'lat':72/4,'lon':144/4,'time':-1},
+                           logginglevel='ERROR') -> xr.Dataset:
+    
+     
+    utils.change_logging_level(logginglevel)
+    
+    fpath = os.path.join(ROOT_DIR, fname)
+    
+    logger.info(f'Opening files {fpath}')
+    
+    if not requested_length:
+        requested_length = get_requested_length(fpath)
+        logger.info(f'{requested_length=}')
+
+
+    # Need to open da and alter length and names of vars
+    model = fname.split('_')[model_index].lower()
+    
+    # Ocassionally fname can contain parts of a path
+    model = os.path.basename(model)
+    
+    ds = xr.open_dataset(fpath)
+    
+    time_length = len(ds.time.values)
+    if time_length < requested_length:
+        raise LongRunMIPError(f"{model=} is too short has {time_length=} < {requested_length=}\n({fname=})")
+    
+    if var is None:
+        var = list(ds.data_vars)[0]
+                
+    logger.info(f'Rename {var=} to {model}')
+
+    logger.debug(ds)
+
+    ds = ds.rename({var: model})[[model]]
+
+    # Some dataset are too long. Getting all data is a waste
+    ds = ds.isel(time=slice(None, max_length))
+    
+    ds = convert_units(ds, var, logginglevel)
+     
+    ds.attrs = {**ds.attrs, **{'length':time_length}}
+
+    return ds
+
+    
+#     if var is None:
+#         var = fname[0].split('_')[0]
+#         logger.info(f'Making assumptions on var {var=}')
+        
+
+def read_and_merge_netcdfs(fnames: List[str], ROOT_DIR: str = '', var:str=None,
+#                            var:str = None, model_index:int = 2, 
+#                            requested_length:int=None, max_length: int = 1200,
+                           logginglevel='ERROR',*args, **kwargs) -> xr.Dataset:
     '''
     Opens a list of fnames found in a common directory. Then merges these files
     together.
@@ -61,43 +136,33 @@ def read_and_merge_netcdfs(fnames: List[str], ROOT_DIR: str = '',
     fnames = os.listdir(ROOT_DIR)
     var = 'tas'
     read_and_merge_netcdfs(fnames, ROOT_DIR, var,)
+    
     '''
+ 
+    utils.change_logging_level(logginglevel)
     
-    def _open_da(root_fname, model, var, model_index = 2, verbose=False):
-        
-        # Opening the dataset, renaming the varialbe to the model name,
-        # (for merging) then converting to dataset.
-        da = xr.open_dataset(root_fname).rename({var: model})[model]
-        
-        if verbose:
-            print(da)
-            print('-----------')
-        
-        wanted_coords = ['lat', 'lon', 'time']
-        
-        # Getting the items that are different
-        unwanted_coords = list(set(da.coords) - set(wanted_coords))
-        if len(unwanted_coords) > 0: # Extra vars detected
-            print(f' - Dropping coords {unwanted_coords}')
-            da = da.drop(unwanted_coords).squeeze()
-        
-
-        return da
-    
-    data = []
+    logger.info(f'Opening files in {ROOT_DIR}')
+     
+    to_merge = []
     for fname in fnames:
-        print(f'{fname}')
+        try:
+            da = read_longrunmip_netcdf(fname=fname, ROOT_DIR=ROOT_DIR, var=var, 
+                                        logginglevel = logginglevel, *args, **kwargs)
+#                            var, model_index, 
+#                            requested_length, max_length,
+#                            logginglevel)
+            to_merge.append(da)
+            
+        except LongRunMIPError as e:
+            logger.error(e)
+            
+    if len(to_merge) == 0:
+        raise LongRunMIPError('No files found')
+           
+    merged_ds = xr.merge(to_merge, compat='override') 
+       
+    return merged_ds
 
-        # Need to open da and alter length and names of vars
-        model = fname.split('_')[2].lower()
-        da = _open_da(os.path.join(ROOT_DIR, fname), model, var, model_index, verbose)
-        
-        # Some files will be rejected if they are too short.
-        data.append(da)
-        da.attrs['length'] = len(da.time.values)
-
-    
-    return xr.merge(data, compat='override') 
 
 
 def convert_numpy_to_cf_datetime(t_input):
@@ -117,7 +182,8 @@ def refactor_dims(ds:xr.Dataset) -> xr.Dataset:
     dims =  np.array(list(ds.dims.keys()))
     
     # This should be the time dim in the dataset.
-    possible_non_time_dims = ['lon', 'lat', 'long', 'longitude', 'latitude', 'lev', 'bnds','bounds', 'model']
+    possible_non_time_dims = ['lon', 'lat', 'long', 'longitude', 'latitude', 'lev', 'bnds','bounds', 'model',
+                             'LON', 'DEPTH', 'depth', 'LAT', 'LATITUDE', 'LAT', 'height', 'z']
     time_dim = dims[~np.isin(dims, possible_non_time_dims)][0]
     
     # Time dime is not called time
@@ -284,7 +350,7 @@ def remove_unwated_coords(da):
     return da
 
 
-def open_and_concat_nc_files(nc_files: List[str]):
+def open_and_concat_nc_files(nc_files: List[str], ROOT_DIR: str='', model_index=-1, logginglevel='ERROR'):
     '''
     Purpose
     -------
@@ -303,15 +369,22 @@ def open_and_concat_nc_files(nc_files: List[str]):
         List of all the files (with directory attached).
         
     '''
+    
+    utils.change_logging_level(logginglevel)
     xr_files = {}
+    
+    
     for f in nc_files:
-        print(f'Opening {f}')
-        model = os.path.basename(f).split('_')[-1].split('.')[0]
-        da = xr.open_dataset(f)
+        logger.info(f'Opening {f}')
+        model = os.path.basename(f).split('_')[model_index]
+        if '.' in model:
+            model = model.split('.')[0]
+        logger.debug(f'{model=}')
+        da = xr.open_dataset(os.path.join(ROOT_DIR, f))
         da = remove_unwated_coords(da)
 
         xr_files[model] = da
-    print(f'Merging together {list(xr_files)}')
+    logger.debug(f'Merging together {list(xr_files)}')
     ds = xr.concat(xr_files.values(), dim = pd.Index(list(xr_files.keys()), name='model'))
 
     return ds
@@ -400,3 +473,72 @@ def get_all_file_names_for_model(model: str, FILE_NAME_DICT: Dict[str, List[str]
         model_fname_dict[exp_type] = file_to_get
         
     return model_fname_dict
+
+
+
+### Longrunmip
+
+def get_models_longer_than_length(requested_legnth: int = 700, debug=False) -> List[str]:
+    '''
+    Gets all the file names for the models longer than a certain length.
+    '''
+    from utils import pprint_list
+    
+    # A list of all the models and how long the runs for 'tas' go for.
+    with open('data/longrunmip_model_lengths.json') as f:
+        longrunmip_model_lengths = json.loads(f.read())
+        
+        # Gtting only the models where the controla dn 4xCO2 are longer than requested_length
+        good_models = {model: len_obj for model, len_obj in longrunmip_model_lengths.items() 
+                       if len_obj['control'] > requested_legnth
+                       and len_obj['4xCO2'] > requested_legnth}
+        
+        good_models = list(good_models.keys())
+        
+        # The model famous is not wanted
+        good_models = np.array(good_models)[np.array(good_models) != 'famous']
+        if debug:
+            print(f'Models with min length {requested_legnth}:')
+            pprint_list(good_models)
+                            
+    return good_models
+
+
+
+    
+def get_file_names_from_from_directory(ROOT_DIR, experiment: ExperimentTypes, 
+                                       models: List[str], logginglevel='ERROR') -> List[str]:
+    '''Gets all file names for a model from a particular diretory'''
+    
+    utils.change_logging_level(logginglevel)
+    
+    if 'signal_to_noise' in experiment.value:
+        ROOT_DIR = os.path.join(ROOT_DIR, experiment.value)
+        
+    logger.info(f'Getting files from {ROOT_DIR}')
+    files_in_directory = os.listdir(ROOT_DIR)
+    logger.debug(utils.pprint_list_string(files_in_directory))
+    paths_to_return = []
+    
+    for model in models:
+        model = model.lower()
+        found_fname = None
+        for fname in files_in_directory:
+            logger.debug(f'{model} - {experiment.value.lower()} - {fname}')
+            if model in fname.lower() and experiment.value.lower() in fname.lower():
+                logger.debug('Found match')
+                found_fname = fname 
+                break
+                
+        if found_fname:
+            paths_to_return.append(found_fname)
+            
+            logger.debug(f'{model=} - {found_fname=}')
+        else:
+            logger.error(f'{model=} - {found_fname=} - No file found')
+            
+    if 'signal_to_noise' in experiment.value:
+        paths_to_return =[os.path.join(experiment.value, fname) for fname in paths_to_return]
+
+        
+    return paths_to_return

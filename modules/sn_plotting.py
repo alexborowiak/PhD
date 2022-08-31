@@ -42,7 +42,9 @@ def temperature_vs_sn_plot(ax,
     
     '''    
     
-    mpl.rcParams.update(mpl.rcParamsDefault)
+#     mpl.rcParams.update(mpl.rcParamsDefault)
+    plt.style.use('seaborn-darkgrid')
+
     ax.plot(sn.time.values,sn.values, label = 'Unstable', c = 'tomato', linestyle='--')
     if isinstance(sn_highlight, xr.DataArray):
         ax.plot(sn_highlight.time.values,sn_highlight.values, label = 'Stable', c = 'darkred')
@@ -108,7 +110,8 @@ def temperature_vs_sn_plot(ax,
 def sn_plot_kwargs(kwargs):
     # The default plot kwargs
     plot_kwargs = dict(height = 15, width = 7, hspace=0.3, vmin = -8, vmax = 8, step = 2, 
-                      cmap = 'RdBu_r', line_color = 'limegreen', line_alpha = 0.5, 
+                      cmap = 'RdBu_r', line_color = 'limegreen', line_alpha = 0.65, 
+                       ax2_ylabel = 'Anomaly',
                       cbar_label = 'S/N',cbartick_offset = 0,title='', label_size = 12, extend='both', 
                       xlowerlim = None, xupperlim = None)
     
@@ -149,8 +152,10 @@ def sn_plot_kwargs(kwargs):
                                 
     plot_kwargs['cbar_ticks'] = cbar_ticks[:len(plot_kwargs['cbar_xticklabels'])]
     
-
-
+    
+    if 'ax2_ylabel' in kwargs.keys():
+        cbar_ticks = kwargs['ax2_ylabel']
+   
     
     print(plot_kwargs)
     print('\n')
@@ -236,7 +241,7 @@ def sn_multi_window_in_time(unstable_sn_multi_window_da: xr.DataArray,
     
     # Usually use a red cmap, so making sure the lines are not red.
     no_red_colors = (plot_kwargs['line_color'], 'darkblue', 'green',
-                     'yellow', 'purple', 'black', 'brown','darkgreen' , 'lightblue', 'greenyellow')
+                     'yellow', 'mediumpurple', 'black','lightgreen' , 'lightblue', 'greenyellow')
     # If there is only one line being used, I want to use a color of my choosing.
     # for the line and thea ax2 spines
     if len(data_vars) == 1:
@@ -262,7 +267,7 @@ def sn_multi_window_in_time(unstable_sn_multi_window_da: xr.DataArray,
         ax2.legend(ncol=ncol)
 
     ### General
-    ax2.set_ylabel(r'Global Mean Temperature Anomaly ($^\circ$C)', size =12);
+    ax2.set_ylabel(plot_kwargs['ax2_ylabel'], size =12);
 
     ax1.set_xlabel('Time (years)', size =plot_kwargs['label_size'])
     ax1.xaxis.set_minor_locator(mticker.MultipleLocator(50))
