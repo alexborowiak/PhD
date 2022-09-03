@@ -96,3 +96,64 @@ def convert_dimension_to_data_vars(da: xr.DataArray, dim:str) -> xr.Dataset:
         
     merged_ds = xr.merge(to_merge, compat='override')
     return merged_ds
+
+
+
+
+
+
+@xr.register_dataset_accessor('utils')
+class Utils:
+    def __init__(self, xarray_obj):
+        self._obj = xarray_obj
+    
+    def var_comparison(self, main_var: str, other_var: str, func: callable):
+        '''Compares one variable to another.
+        This is useful for getting where the signal_to_nosie is above the 
+        upper bound (unstable)
+        
+        '''
+        ds = self._obj
+        
+        return ds[main_var].where(func(ds[main_var], ds[other_var])).to_dataset()
+    
+    @staticmethod
+    def _deal_with_bounds(ds, main_var, greater_than_var, less_than_var, func):
+        '''
+        func = np.logical_and for when getting stable data
+        (greater than lower AND less than upper)
+        func = np.logical_or for when getting unstable
+        (greater than upper OR less than lower)
+        '''
+        
+        return ds[main_var].where(func(
+            ds[main_var] > ds[greater_than_var], ds[main_var] < ds[less_than_var])).to_dataset()
+    
+    def between(self, main_var: str, greater_than_var: str, less_than_var: str):
+        '''
+        Bounds on variable by two other. Useful for getting where data is stable
+
+    
+        unstable_sn_multi_window_da = sn_multiwindow_ds.utils.between(
+        'signal_to_noise', less_than_var = 'upper_bound', greater_than_var = 'lower_bound')
+        '''
+        ds = self._obj
+        
+        return self._deal_with_bounds(ds, main_var, greater_than_var, less_than_var, np.logical_and)
+    
+    def above_or_below(self, main_var: str, greater_than_var: str, less_than_var: str):
+        '''
+        
+         Bounds on variable by two other. Useful for getting where data is stable
+        
+        
+         unstable_sn_multi_window_da = sn_multiwindow_ds.utils.above_or_below(
+        'signal_to_noise', greater_than_var = 'upper_bound', less_than_var = 'lower_bound')
+        
+        
+        '''
+        ds = self._obj
+        
+        return self._deal_with_bounds(ds, main_var, greater_than_var, less_than_var, np.logical_or)
+        
+  

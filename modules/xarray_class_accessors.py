@@ -189,7 +189,10 @@ class SignalToNoise:
         >>> mean_temp_loess_detrend = mean_temp - mean_temp_loess
 
         '''
-
+        # If all values are nan. This can occur for variables 
+        # that are masked over land ect.
+        if all(~np.isfinite(y)):
+            return [np.nan] * len(y)
         # Removign the nans
         idy = np.isfinite(y)
         y = y[idy]
@@ -211,7 +214,7 @@ class SignalToNoise:
                                              
         data = self._obj
         
-        data = data.dropna(dim='time')
+        #data = data.dropna(dim='time')
            
         # Loess filter
         loess = np.apply_along_axis(self.loess_filter, data.get_axis_num('time'), data.values,
@@ -306,14 +309,16 @@ class SignalToNoise:
 
 
         # Rolling gradient * window
-        signal = data.rolling(time = window, min_periods = min_periods, center = True)\
+        signal_da = data.rolling(time = window, min_periods = min_periods, center = True)\
             .reduce(self._apply_along_helper, func1d = self.trend_line) * window
     
-        signal = signal.sn.adjust_time_from_rolling(window = window, logginglevel=logginglevel)
+        signal_da = signal_da.sn.adjust_time_from_rolling(window = window, logginglevel=logginglevel)
     
-        signal.name = 'signal'
-    
-        return signal
+        signal_da.name = 'signal'
+        
+        signal_da = signal_da.expand_dims('window').assign_coords(window=('window', [window]))
+
+        return signal_da
 
     
     def calculate_rolling_noise(self, window = 61, min_periods = 0,logginglevel='ERROR') -> xr.DataArray:
@@ -329,152 +334,154 @@ class SignalToNoise:
             min_periods = window
         
         # Rolling standard deviation
-        noise = \
+        noise_da = \
            data.rolling(time = window, min_periods = min_periods, center = True).std()
             
-        noise = noise.sn.adjust_time_from_rolling(window = window, logginglevel=logginglevel) 
+        noise_da = noise_da.sn.adjust_time_from_rolling(window = window, logginglevel=logginglevel) 
         
-        noise.name = 'noise'
+        noise_da.name = 'noise'
         
-        return noise
+        noise_da = noise_da.expand_dims('window').assign_coords(window=('window', [window]))
+        
+        return noise_da
     
  
     
-    def sn_multiwindow(self, historical_da: xr.Dataset, start_window = 20, end_window = 40, step_window = 5
-                      , logginglevel='ERROR'):
-        '''Loops through all of the data vars in an xarray dataset.'''
+#     def sn_multiwindow(self, historical_da: xr.Dataset, start_window = 20, end_window = 40, step_window = 5
+#                       , logginglevel='ERROR'):
+#         '''Loops through all of the data vars in an xarray dataset.'''
         
         
-        da = self._obj
+#         da = self._obj
 
-        unstable_sn_da , stable_sn_da  = sn.sn_multi_window(
-                                        da, 
-                                        historical_da, 
-                                        start_window = start_window,
-                                        end_window=end_window, step_window=step_window,
-                                        logginglevel=logginglevel)
+#         unstable_sn_da , stable_sn_da  = sn.sn_multi_window(
+#                                         da, 
+#                                         historical_da, 
+#                                         start_window = start_window,
+#                                         end_window=end_window, step_window=step_window,
+#                                         logginglevel=logginglevel)
                    
                          
-        return unstable_sn_da , stable_sn_da
+#         return unstable_sn_da , stable_sn_da
                     
        
     
-    @staticmethod
-    def _consecutive_counter(data: np.array,logginglevel='ERROR') -> np.array:
-        '''
-        Calculates two array. The first is the start of all the instances of 
-        exceeding a threshold. The other is the consecutive length that the 
-        threshold.
-        TODO: Need to adds in the rolling timeframe. The data is not just unstable
-        starting at a specific point, but for the entire time. 
+#     @staticmethod
+#     def _consecutive_counter(data: np.array,logginglevel='ERROR') -> np.array:
+#         '''
+#         Calculates two array. The first is the start of all the instances of 
+#         exceeding a threshold. The other is the consecutive length that the 
+#         threshold.
+#         TODO: Need to adds in the rolling timeframe. The data is not just unstable
+#         starting at a specific point, but for the entire time. 
 
-        Parameters
-        ----------
-        data: np.ndarray
-              Groups of booleans.
+#         Parameters
+#         ----------
+#         data: np.ndarray
+#               Groups of booleans.
 
-        Returns
-        -------
-        consec_start: An array of all start times of consecuitve sequences.
-        consec_len: The length of all the exceedneces.
+#         Returns
+#         -------
+#         consec_start: An array of all start times of consecuitve sequences.
+#         consec_len: The length of all the exceedneces.
 
-        TODO: Could this be accelerated with numba.njit???? The arrays will 
-        always be of unkonw length.
-        '''
+#         TODO: Could this be accelerated with numba.njit???? The arrays will 
+#         always be of unkonw length.
+#         '''
 
-        # Data should have nans where conditionsis not met.
-        if all(np.isnan(data)):
-            logger.debug('All are nan values - returning nan values')
-            return np.array([np.nan] * 5)
+#         # Data should have nans where conditionsis not met.
+#         if all(np.isnan(data)):
+#             logger.debug('All are nan values - returning nan values')
+#             return np.array([np.nan] * 5)
             
-        condition = np.where(np.isfinite(data), True, False)
-        #condition = data >= stable_bound
+#         condition = np.where(np.isfinite(data), True, False)
+#         #condition = data >= stable_bound
 
-        consec_start_arg = []
-        consec_len = []
+#         consec_start_arg = []
+#         consec_len = []
 
-        # Arg will keep track of looping through the list.
-        arg = 0
+#         # Arg will keep track of looping through the list.
+#         arg = 0
 
-        # This loop will grup the array of Boleans together.  Key is the first value in the
-        # group and group will be the list of similar values.
-        #[True, True, True, False, True, False, True, True] will have the groups that will be accepted 
-        # by 'if key':
-        #[[True, True, True], [True], [True, True]]
-        for key, group in itertools.groupby(condition):
-            # Consec needs to be defined here for the arg
-            consec = len(list(group))
+#         # This loop will grup the array of Boleans together.  Key is the first value in the
+#         # group and group will be the list of similar values.
+#         #[True, True, True, False, True, False, True, True] will have the groups that will be accepted 
+#         # by 'if key':
+#         #[[True, True, True], [True], [True, True]]
+#         for key, group in itertools.groupby(condition):
+#             # Consec needs to be defined here for the arg
+#             consec = len(list(group))
             
-            # If they key is true, this means
-            if key:
-                consec_start_arg.append(arg)
-                consec_len.append(consec)
+#             # If they key is true, this means
+#             if key:
+#                 consec_start_arg.append(arg)
+#                 consec_len.append(consec)
 
-            arg += consec
+#             arg += consec
 
-        # First time stable
-        first_stable = consec_start_arg[0]
+#         # First time stable
+#         first_stable = consec_start_arg[0]
 
-        # Average lenght of period
-        average_consec_length = np.mean(consec_len)
+#         # Average lenght of period
+#         average_consec_length = np.mean(consec_len)
 
-        # Total number periods
-        number_consec = len(consec_len)
+#         # Total number periods
+#         number_consec = len(consec_len)
 
-        # Sum of all period
-        total_consec = np.sum(consec_len)
+#         # Sum of all period
+#         total_consec = np.sum(consec_len)
 
-        # Fraction of total where condition is met
-        frac_total = total_consec * 100 / len(data)
+#         # Fraction of total where condition is met
+#         frac_total = total_consec * 100 / len(data)
         
-        return np.array([first_stable, average_consec_length,number_consec, total_consec, frac_total])
+#         return np.array([first_stable, average_consec_length,number_consec, total_consec, frac_total])
         
-    def calculate_consecutive_metrics(self, logginglevel='ERROR'):
+#     def calculate_consecutive_metrics(self, logginglevel='ERROR'):
     
-        eval(f'logging.getLogger().setLevel(logging.{logginglevel})')
+#         eval(f'logging.getLogger().setLevel(logging.{logginglevel})')
         
-        data = self._obj
+#         data = self._obj
         
-        # Applying the consecitve_counter function along the time axis.
-        output = np.apply_along_axis(
-                            self._consecutive_counter,
-                            data.get_axis_num('time'), 
-                            data)
+#         # Applying the consecitve_counter function along the time axis.
+#         output = np.apply_along_axis(
+#                             self._consecutive_counter,
+#                             data.get_axis_num('time'), 
+#                             data)
 
-        print(f'New data has shape {output.shape}')
-        # Creating an exmpty dataset with no time dimension
-        ds = xr.zeros_like(data.isel(time=0).squeeze())
+#         print(f'New data has shape {output.shape}')
+#         # Creating an exmpty dataset with no time dimension
+#         ds = xr.zeros_like(data.isel(time=0).squeeze())
         
-        # Adding in the first dimension to the dataset
-        ds.name = 'first_stable'
+#         # Adding in the first dimension to the dataset
+#         ds.name = 'first_stable'
         
-        # Output is an array of arrays. Adding the first elemtn
-        ds += output[0]
+#         # Output is an array of arrays. Adding the first elemtn
+#         ds += output[0]
         
-        # Converting to dataset so other data vars can be added.
-        ds = ds.to_dataset()
-        
-        
-        # The dims data should have
-        dims = np.array(data.dims) 
-        
-        # Data has been reduced along time dimension. Don't want time.
-        dims_sans_time = dims[dims != 'time']
-        
-        # Adding all other variables
-        ds['average_length'] = (dims_sans_time, output[1])
-        ds['number_periods'] = (dims_sans_time, output[2])
-        ds['total_time_stable'] = (dims_sans_time, output[3])
-        ds['percent_time_stable'] = (dims_sans_time, output[4])
+#         # Converting to dataset so other data vars can be added.
+#         ds = ds.to_dataset()
         
         
-        # Adding long names
-        ds.first_stable.attrs = {"long_name": "** First Year Stable", 'units':'year'}
-        ds.average_length.attrs = {"long_name": "** Average Length of Stable Periods", 'units':'year'}
-        ds.number_periods.attrs = {"long_name": "** Number of Different Stable Periods", 'units':''}
-        ds.percent_time_stable.attrs = {"long_name": "** Percent of Time Stable", 'units':'%'}
+#         # The dims data should have
+#         dims = np.array(data.dims) 
+        
+#         # Data has been reduced along time dimension. Don't want time.
+#         dims_sans_time = dims[dims != 'time']
+        
+#         # Adding all other variables
+#         ds['average_length'] = (dims_sans_time, output[1])
+#         ds['number_periods'] = (dims_sans_time, output[2])
+#         ds['total_time_stable'] = (dims_sans_time, output[3])
+#         ds['percent_time_stable'] = (dims_sans_time, output[4])
+        
+        
+#         # Adding long names
+#         ds.first_stable.attrs = {"long_name": "** First Year Stable", 'units':'year'}
+#         ds.average_length.attrs = {"long_name": "** Average Length of Stable Periods", 'units':'year'}
+#         ds.number_periods.attrs = {"long_name": "** Number of Different Stable Periods", 'units':''}
+#         ds.percent_time_stable.attrs = {"long_name": "** Percent of Time Stable", 'units':'%'}
 
-        return ds.squeeze()
+#         return ds.squeeze()
     
     
     
@@ -532,7 +539,7 @@ class SignalToNoiseDS:
         self._obj = xarray_obj    
         
     def sn_multiwindow(self, historical_ds: xr.Dataset, start_window = 20, end_window = 40, step_window = 5
-                      , logginglevel='ERROR'):
+                      , logginglevel='ERROR', parallel=False):
         
         
         '''Loops through all of the data vars in an xarray dataset.'''
@@ -556,12 +563,10 @@ class SignalToNoiseDS:
                 da = ds[dvar].dropna(dim='time')
                 da_hist = historical_ds[dvar].dropna(dim='time')
                 unstable_sn_ds , stable_sn_ds  = sn.sn_multi_window(
-                                        da, 
-                                        da_hist, 
-                                        start_window = start_window,
-                                        end_window=end_window, step_window=step_window,
-                                        logginglevel='ERROR' # DOn't want this to log. Is too much
-                )
+                                     da, da_hist, 
+                                      start_window = start_window, end_window=end_window, step_window=step_window,
+                                       parallel=parallel, logginglevel='ERROR')
+                
                 
                 # Storing the values as a dictionary and not concating for now.
                 stable_sn_dict[dvar] = stable_sn_ds['signal_to_noise']

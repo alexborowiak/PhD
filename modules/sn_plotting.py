@@ -10,6 +10,7 @@ import matplotlib.gridspec as gridspec
 from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
 from typing import Dict
 import exceptions
+from constants import MODEL_PARAMS
 
 import sys,logging
 logging.basicConfig(format="%(message)s", filemode='w', stream = sys.stdout)
@@ -233,7 +234,7 @@ def sn_multi_window_in_time(unstable_sn_multi_window_da: xr.DataArray,
     ax2 = ax1.twinx()
     
     if isinstance(abrupt_anom_smean, xr.DataArray):
-        abrupt_anom_smean = abrupt_anom_smean.to_dataset(name='tas')
+        abrupt_anom_smean = abrupt_anom_smean.to_dataset(name='variable')
     
     # The variables to loop through and plot
     data_vars = list(abrupt_anom_smean.data_vars)
@@ -248,13 +249,25 @@ def sn_multi_window_in_time(unstable_sn_multi_window_da: xr.DataArray,
         ax2.spines['right'].set_color(plot_kwargs['line_color'])
         ax2.tick_params(axis='y', colors=plot_kwargs['line_color'])
 
-    print(data_vars)
+    print(f'{data_vars=}')
     for i, dvar in enumerate(data_vars):
         print(str(i) + ' ', end='')
+        
+        if dvar in list(MODEL_PARAMS):
+            c = MODEL_PARAMS[dvar]['color']
+        else:
+            c = no_red_colors[i]
+            
         da = abrupt_anom_smean[dvar]
+        label=dvar
+        
+        if dvar in list(MODEL_PARAMS):
+            ECS = MODEL_PARAMS[dvar]['ECS']
+            label += f' ({ECS}K)' 
+            
         ax2.plot(da.time.dt.year.values, da.values,
-                 alpha= plot_kwargs['line_alpha'], zorder=1000, label=dvar, linewidth = 2, 
-                c = no_red_colors[i])
+                 alpha= plot_kwargs['line_alpha'], zorder=1000, label=label, linewidth = 2, 
+                c = c)
 
 
     
@@ -264,14 +277,16 @@ def sn_multi_window_in_time(unstable_sn_multi_window_da: xr.DataArray,
             ncol = plot_kwargs['cbar_ncols']
         else:
             ncol = len(data_vars)
-        ax2.legend(ncol=ncol)
+        leg = ax2.legend(ncol=ncol, fontsize = 12)
+        leg.set_title('Model')
+        leg.get_title().set_fontsize('12')
 
     ### General
     ax2.set_ylabel(plot_kwargs['ax2_ylabel'], size =12);
 
     ax1.set_xlabel('Time (years)', size =plot_kwargs['label_size'])
     ax1.xaxis.set_minor_locator(mticker.MultipleLocator(50))
-    ax1.set_title(plot_kwargs['title'])
+    ax1.set_title(plot_kwargs['title'], fontsize=15)
 
     ax1.set_xlim(plot_kwargs['xlowerlim'], plot_kwargs['xupperlim'])
     

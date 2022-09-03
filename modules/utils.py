@@ -5,8 +5,22 @@ logger = logging.getLogger()
 
 def get_notebook_logger():
     import logging, sys
+
+#     logger = logging.getLogger()  
+#     logger_handler = logging.StreamHandler()  
+#     logger.addHandler(logger_handler)
+#     logger_handler.setFormatter(logging.Formatter('[-%(name)s -%(funcName)s -%(levelname)s] %(message)s'))
+#     logger.handlers[0].stream = sys.stdout
+    import logging, sys
     logging.basicConfig(format=" - %(message)s", filemode='w', stream=sys.stdout)
     logger = logging.getLogger()
+    
+#     logger_handler = logging.StreamHandler() 
+#     logger.addHandler(logger_handler)
+#     logger_handler.setFormatter(logging.Formatter('[-%(name)s -%(funcName)s -%(levelname)s] %(message)s'))
+#     logger.handlers[0].stream = sys.stdout
+
+
     
     return logger
 

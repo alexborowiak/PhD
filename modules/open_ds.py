@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 import cftime
-from typing import List, Dict
+from typing import List, Dict, Union
 import os
 from glob import glob
 import constants
@@ -12,6 +12,76 @@ from classes import ExperimentTypes, LongRunMIPError
 
 import utils
 logger = utils.get_notebook_logger()
+
+
+
+### Longrunmip
+
+def get_models_longer_than_length(experiment_length: int = 700, control_length: int = 500, debug=False) -> List[str]:
+    '''
+    Gets all the file names for the models longer than a certain length.
+    '''
+    from utils import pprint_list
+    
+    # A list of all the models and how long the runs for 'tas' go for.
+    with open('data/longrunmip_model_lengths.json') as f:
+        longrunmip_model_lengths = json.loads(f.read())
+        
+        # Gtting only the models where the controla dn 4xCO2 are longer than requested_length
+        good_models = {model: len_obj for model, len_obj in longrunmip_model_lengths.items() 
+                       if len_obj['control'] > control_length
+                       and len_obj['4xCO2'] > experiment_length}
+        
+        good_models = list(good_models.keys())
+        
+        # The model famous is not wanted
+        good_models = np.array(good_models)[np.array(good_models) != 'famous']
+        if debug:
+            print(f'Models with min length {requested_legnth}:')
+            pprint_list(good_models)
+                            
+    return good_models
+
+
+
+    
+def get_file_names_from_from_directory(ROOT_DIR, experiment: ExperimentTypes, 
+                                       models: List[str], logginglevel='ERROR') -> List[str]:
+    '''Gets all file names for a model from a particular diretory'''
+    
+    utils.change_logging_level(logginglevel)
+    
+    if 'signal_to_noise' in experiment.value:
+        ROOT_DIR = os.path.join(ROOT_DIR, experiment.value)
+        
+    logger.info(f'Getting files from {ROOT_DIR}')
+    files_in_directory = os.listdir(ROOT_DIR)
+    logger.debug(utils.pprint_list_string(files_in_directory))
+    paths_to_return = []
+    
+    for model in models:
+        model = model.lower()
+        found_fname = None
+        for fname in files_in_directory:
+            logger.debug(f'{model} - {experiment.value.lower()} - {fname}')
+            if model in fname.lower() and experiment.value.lower() in fname.lower():
+                logger.debug('Found match')
+                found_fname = fname 
+                break
+                
+        if found_fname:
+            paths_to_return.append(found_fname)
+            
+            logger.debug(f'{model=} - {found_fname=}')
+        else:
+            logger.error(f'{model=} - {found_fname=} - No file found')
+            
+    if 'signal_to_noise' in experiment.value:
+        paths_to_return =[os.path.join(experiment.value, fname) for fname in paths_to_return]
+
+        
+    return paths_to_return
+
 
 def open_dataset(fpath: str) -> xr.Dataset:
     '''
@@ -23,7 +93,7 @@ def open_dataset(fpath: str) -> xr.Dataset:
     # TODO: Need to figure out what the error is with files having a string as timestep.
     try:
         ds = open_function(fpath, use_cftime=True)
-        return ds
+        return ds.squeeze()
     except ValueError as e:
         print(f'{os.path.basename(fpath)} has failed with ValueError')
         
@@ -37,13 +107,27 @@ def open_dataset(fpath: str) -> xr.Dataset:
 def convert_units(ds: xr.Dataset, variable: str, logginglevel='ERROR'):
     utils.change_logging_level(logginglevel)
     SECONDS_IN_YEAR = 365 * 24 * 60 * 60
+    KELVIN_TO_DEGC = 273.15
+    logger.debug(f'{ds}')
     if variable == 'tas':
         logger.info('Converting from Kelvin to C')
-        return ds-273.15
+        return ds-KELVIN_TO_DEGC
     if variable == 'pr':
         logger.info('Converting from per second to yearly total')
         ds = ds * SECONDS_IN_YEAR
         return ds
+    
+    if variable == 'tos':
+        if ds.to_array().min().values > 200:
+            logger.info('Units are in Kelvin. Converting to DegC')
+            
+            return ds-KELVIN_TO_DEGC
+    
+    if variable == 'sic':
+        # This means value is in percent not as a fraction
+        if ds.to_array().max().values > 1.5:
+            return ds/100
+            
     return ds
     
     
@@ -55,13 +139,42 @@ def get_requested_length(fname: str):
     return 800
 
 
+
+def get_mask_for_model(model: str) -> xr.Dataset:
+    '''
+    Opens the land sea mask for a specific model found in the directory
+    constants.LONGRUNMIP_MASK_DIR
+    '''
+    mask_list = os.listdir(constants.LONGRUNMIP_MASK_DIR)
+    model_mask_name = [fname for fname in mask_list if model.lower() in fname.lower()]
+    
+    if len(model_mask_name) == 0:
+        raise IndexError(f'No mask found for model {model_mask_name=}')
+
+    model_mask_name = model_mask_name[0]
+ 
+    mask_ds = xr.open_dataset(os.path.join(constants.LONGRUNMIP_MASK_DIR, model_mask_name))
+    return mask_ds
+
+def  apply_landsea_mask(ds: xr.Dataset, model:str, mask: Union['land', 'sea'] = None):
+    '''
+    Applies either a land or sea mask to the dataset. 
+    '''
+    mask_ds = get_mask_for_model(model)
+    
+    if mask == 'land':
+        return ds.where(mask_ds.mask == 1)
+    if  mask == 'sea':
+        return ds.where(mask_ds.mask != 1)
+    raise ValueError(f'{mask} is not a valid mask option. Please use either [land, sea]')
+        
 def read_longrunmip_netcdf(fname: str, ROOT_DIR: str = '',
                            var:str = None, model_index:int = 2, 
                            requested_length:int=None, max_length: int = 1200,
                            chunks = {'lat':72/4,'lon':144/4,'time':-1},
+                           mask: Union['land', 'sea'] = None,
                            logginglevel='ERROR') -> xr.Dataset:
     
-     
     utils.change_logging_level(logginglevel)
     
     fpath = os.path.join(ROOT_DIR, fname)
@@ -81,6 +194,25 @@ def read_longrunmip_netcdf(fname: str, ROOT_DIR: str = '',
     
     ds = xr.open_dataset(fpath)
     
+    def remove_start_time_steps(ds, number_to_remove:int):
+        logger.error(f'Removing first 10 steps for {fname}')
+        new_time = ds.time.values[:-number_to_remove]
+        ds = ds.isel(time=slice(number_to_remove, None))
+        ds['time'] = new_time
+        
+        return ds
+    
+        
+    
+    # First few time stemps of ccsm3 control are not in equilibrium
+    # TODO: Better to just remove this in the procesing step
+    if 'control' in fname.lower() and 'ccsm3' in fname.lower():
+        ds = remove_start_time_steps(ds, 10)
+    
+    if 'tos' in fname.lower() and 'abrupt4x' in fname.lower() and 'ipslcm5a' in fname.lower():
+        ds = remove_start_time_steps(ds, 200)
+
+    
     time_length = len(ds.time.values)
     if time_length < requested_length:
         raise LongRunMIPError(f"{model=} is too short has {time_length=} < {requested_length=}\n({fname=})")
@@ -96,6 +228,11 @@ def read_longrunmip_netcdf(fname: str, ROOT_DIR: str = '',
 
     # Some dataset are too long. Getting all data is a waste
     ds = ds.isel(time=slice(None, max_length))
+    
+    ds = ds.squeeze()
+    
+    if mask:
+        ds = apply_landsea_mask(ds, model, mask)
     
     ds = convert_units(ds, var, logginglevel)
      
@@ -476,69 +613,3 @@ def get_all_file_names_for_model(model: str, FILE_NAME_DICT: Dict[str, List[str]
 
 
 
-### Longrunmip
-
-def get_models_longer_than_length(requested_legnth: int = 700, debug=False) -> List[str]:
-    '''
-    Gets all the file names for the models longer than a certain length.
-    '''
-    from utils import pprint_list
-    
-    # A list of all the models and how long the runs for 'tas' go for.
-    with open('data/longrunmip_model_lengths.json') as f:
-        longrunmip_model_lengths = json.loads(f.read())
-        
-        # Gtting only the models where the controla dn 4xCO2 are longer than requested_length
-        good_models = {model: len_obj for model, len_obj in longrunmip_model_lengths.items() 
-                       if len_obj['control'] > requested_legnth
-                       and len_obj['4xCO2'] > requested_legnth}
-        
-        good_models = list(good_models.keys())
-        
-        # The model famous is not wanted
-        good_models = np.array(good_models)[np.array(good_models) != 'famous']
-        if debug:
-            print(f'Models with min length {requested_legnth}:')
-            pprint_list(good_models)
-                            
-    return good_models
-
-
-
-    
-def get_file_names_from_from_directory(ROOT_DIR, experiment: ExperimentTypes, 
-                                       models: List[str], logginglevel='ERROR') -> List[str]:
-    '''Gets all file names for a model from a particular diretory'''
-    
-    utils.change_logging_level(logginglevel)
-    
-    if 'signal_to_noise' in experiment.value:
-        ROOT_DIR = os.path.join(ROOT_DIR, experiment.value)
-        
-    logger.info(f'Getting files from {ROOT_DIR}')
-    files_in_directory = os.listdir(ROOT_DIR)
-    logger.debug(utils.pprint_list_string(files_in_directory))
-    paths_to_return = []
-    
-    for model in models:
-        model = model.lower()
-        found_fname = None
-        for fname in files_in_directory:
-            logger.debug(f'{model} - {experiment.value.lower()} - {fname}')
-            if model in fname.lower() and experiment.value.lower() in fname.lower():
-                logger.debug('Found match')
-                found_fname = fname 
-                break
-                
-        if found_fname:
-            paths_to_return.append(found_fname)
-            
-            logger.debug(f'{model=} - {found_fname=}')
-        else:
-            logger.error(f'{model=} - {found_fname=} - No file found')
-            
-    if 'signal_to_noise' in experiment.value:
-        paths_to_return =[os.path.join(experiment.value, fname) for fname in paths_to_return]
-
-        
-    return paths_to_return
