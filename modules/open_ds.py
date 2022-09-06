@@ -9,7 +9,7 @@ import constants
 import json
 from enum import Enum
 from classes import ExperimentTypes, LongRunMIPError
-
+import signal_to_noise
 import utils
 logger = utils.get_notebook_logger()
 
@@ -167,7 +167,19 @@ def  apply_landsea_mask(ds: xr.Dataset, model:str, mask: Union['land', 'sea'] = 
     if  mask == 'sea':
         return ds.where(mask_ds.mask != 1)
     raise ValueError(f'{mask} is not a valid mask option. Please use either [land, sea]')
-        
+    
+    
+    
+def remove_start_time_steps(ds, number_to_remove:int):
+    '''Removes the start number_to_remove points and adjsuts the time accordingly.'''
+    logger.error(f'Removing first {number_to_remove} steps')
+    new_time = ds.time.values[:-number_to_remove]
+    ds = ds.isel(time=slice(number_to_remove, None))
+    ds['time'] = new_time
+
+    return ds
+
+
 def read_longrunmip_netcdf(fname: str, ROOT_DIR: str = '',
                            var:str = None, model_index:int = 2, 
                            requested_length:int=None, max_length: int = 1200,
@@ -178,32 +190,17 @@ def read_longrunmip_netcdf(fname: str, ROOT_DIR: str = '',
     utils.change_logging_level(logginglevel)
     
     fpath = os.path.join(ROOT_DIR, fname)
-    
     logger.info(f'Opening files {fpath}')
     
     if not requested_length:
         requested_length = get_requested_length(fpath)
         logger.info(f'{requested_length=}')
 
-
-    # Need to open da and alter length and names of vars
-    model = fname.split('_')[model_index].lower()
-    
-    # Ocassionally fname can contain parts of a path
-    model = os.path.basename(model)
+    model = fname.split('_')[model_index].lower() # Need to open da and alter length and names of vars
+    model = os.path.basename(model) # Ocassionally fname can contain parts of a path
     
     ds = xr.open_dataset(fpath)
-    
-    def remove_start_time_steps(ds, number_to_remove:int):
-        logger.error(f'Removing first 10 steps for {fname}')
-        new_time = ds.time.values[:-number_to_remove]
-        ds = ds.isel(time=slice(number_to_remove, None))
-        ds['time'] = new_time
         
-        return ds
-    
-        
-    
     # First few time stemps of ccsm3 control are not in equilibrium
     # TODO: Better to just remove this in the procesing step
     if 'control' in fname.lower() and 'ccsm3' in fname.lower():
@@ -211,44 +208,32 @@ def read_longrunmip_netcdf(fname: str, ROOT_DIR: str = '',
     
     if 'tos' in fname.lower() and 'abrupt4x' in fname.lower() and 'ipslcm5a' in fname.lower():
         ds = remove_start_time_steps(ds, 200)
-
-    
+        
     time_length = len(ds.time.values)
+    
     if time_length < requested_length:
         raise LongRunMIPError(f"{model=} is too short has {time_length=} < {requested_length=}\n({fname=})")
-    
     if var is None:
         var = list(ds.data_vars)[0]
                 
     logger.info(f'Rename {var=} to {model}')
-
     logger.debug(ds)
 
     ds = ds.rename({var: model})[[model]]
-
-    # Some dataset are too long. Getting all data is a waste
     ds = ds.isel(time=slice(None, max_length))
-    
     ds = ds.squeeze()
     
     if mask:
         ds = apply_landsea_mask(ds, model, mask)
     
     ds = convert_units(ds, var, logginglevel)
-     
     ds.attrs = {**ds.attrs, **{'length':time_length}}
 
     return ds
 
     
-#     if var is None:
-#         var = fname[0].split('_')[0]
-#         logger.info(f'Making assumptions on var {var=}')
-        
 
 def read_and_merge_netcdfs(fnames: List[str], ROOT_DIR: str = '', var:str=None,
-#                            var:str = None, model_index:int = 2, 
-#                            requested_length:int=None, max_length: int = 1200,
                            logginglevel='ERROR',*args, **kwargs) -> xr.Dataset:
     '''
     Opens a list of fnames found in a common directory. Then merges these files
@@ -265,7 +250,6 @@ def read_and_merge_netcdfs(fnames: List[str], ROOT_DIR: str = '', var:str=None,
     model_index: int
         When splitting by "_" where does the model name appear in the lsit
 
-        
     Example
     --------
     
@@ -283,12 +267,10 @@ def read_and_merge_netcdfs(fnames: List[str], ROOT_DIR: str = '', var:str=None,
     to_merge = []
     for fname in fnames:
         try:
-            da = read_longrunmip_netcdf(fname=fname, ROOT_DIR=ROOT_DIR, var=var, 
+            ds = read_longrunmip_netcdf(fname=fname, ROOT_DIR=ROOT_DIR, var=var, 
                                         logginglevel = logginglevel, *args, **kwargs)
-#                            var, model_index, 
-#                            requested_length, max_length,
-#                            logginglevel)
-            to_merge.append(da)
+
+            to_merge.append(ds)
             
         except LongRunMIPError as e:
             logger.error(e)
@@ -300,7 +282,76 @@ def read_and_merge_netcdfs(fnames: List[str], ROOT_DIR: str = '', var:str=None,
        
     return merged_ds
 
+def get_mean_for_experiment(ROOT_DIR, experiment_params, models_to_get):
+    '''Gets the global mean/value of experiment and picontrol. '''
+    
+    
+    # Directory to get files from
+    VARIABLE_DIR = os.path.join(ROOT_DIR, experiment_params["variable"], 'regrid_retimestamped')
+    
+    # Files to open
+    files_to_open_experiment = get_file_names_from_from_directory(VARIABLE_DIR,
+                                                               ExperimentTypes.ABRUPT4X,
+                                                               models_to_get)
 
+    files_to_open_control = get_file_names_from_from_directory(VARIABLE_DIR,
+                                                               ExperimentTypes.CONTROL,
+                                                               models_to_get)
+    
+    # Opening files
+
+    control_ds = read_and_merge_netcdfs(files_to_open_control, VARIABLE_DIR, 
+                                                mask=experiment_params['mask'])
+
+    abrupt4x_ds = read_and_merge_netcdfs(files_to_open_experiment, VARIABLE_DIR,
+                                                 mask=experiment_params['mask'])
+
+    # Getting the glboal value (mean for all other variables other than sic)
+    abrupt4x_mean,control_ds_mean = signal_to_noise.calculate_global_value(
+        abrupt4x_ds, control_ds, experiment_params["variable"],
+        constants.HEMISPHERE_LAT[experiment_params['hemisphere']])
+    
+    return abrupt4x_mean,control_ds_mean
+
+
+def get_experiment_name_from_params(experiment_params: Dict[str, str]) -> str:
+    '''Converts the expeimenet dict name to a string name of just the values.'''
+    experiment_name = '' 
+
+    for key, value in experiment_params.items():
+        value = value + '_' if value else ''
+        experiment_name = f'{experiment_name}{value}'
+    experiment_name= experiment_name[:-1]
+    
+    return experiment_name
+
+
+def get_all_experiment_ds(experiments_to_run, directory, models_to_get):
+    '''
+    Get all the different expereiments and merges them into a xr.Dataset. This Dataset
+    has a model coodinate, and all the data vars are for each periment. The name of each si 
+    created using get_experiment_name_from_params (e.g. tas_land_global)
+    '''
+
+    to_merge_experiment = []
+    to_merge_control = []
+    for experiment_params in experiments_to_run:
+        print(f'\n- {experiment_params}')
+
+        abrupt4x_mean, control_ds_mean = get_mean_for_experiment(directory, experiment_params, models_to_get)
+        
+        experiment_name = get_experiment_name_from_params(experiment_params)
+        
+        # Change models from data_var to coord. Then make into dataset.
+        experiment_ds = abrupt4x_mean.to_array(dim='model').to_dataset(name=experiment_name)
+        control_ds = control_ds_mean.to_array(dim='model').to_dataset(name=experiment_name)
+        to_merge_experiment.append(experiment_ds)
+        to_merge_control.append(control_ds)
+
+    all_experiment_ds = xr.merge(to_merge_experiment).drop(['height', 'depth'], errors='ignore')
+    all_control_ds = xr.merge(to_merge_control).drop(['height', 'depth'], errors='ignore')
+    
+    return all_experiment_ds, all_control_ds
 
 def convert_numpy_to_cf_datetime(t_input):
     '''This function converts a numpy datetime to cftime.'''
@@ -388,6 +439,7 @@ def correct_dataset(ds, debug=False, **kwargs):
         
     # TODO: The can be change to the make_new_time function
     # New start time is zero
+    # TODO: The month and hour should be 1
     t0_new = cftime.datetime(1, 1, 1, 0, 0, 0, 0, calendar='gregorian')
     # New end time is the total length of the old dataset added to t0
     tf_new = t0_new + (tf - t0)

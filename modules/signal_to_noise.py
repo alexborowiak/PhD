@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import itertools
 import xarray as xr
-from typing import Optional, Union
+from typing import Optional, Union, Dict
 import xarray_extender as xe
 import os, sys
 from dask.diagnostics import ProgressBar
@@ -34,8 +34,11 @@ def calculate_ice_earth_fraction(ds: xr.Dataset) -> xr.Dataset:
     global_frac_ds = ds.sum(dim=['lat', 'lon'])/ocean_as_1_ds.sum(dim=['lat', 'lon'])
     return global_frac_ds
 
-def calculate_global_value(ds: xr.Dataset, control_ds: xr.Dataset, variable:str):
+def calculate_global_value(ds: xr.Dataset, control_ds: xr.Dataset, variable:str, lat_bounds:tuple=(None,None)):
     '''Calculates anomalies and mean.'''
+    ds = ds.sel(lat=slice(*lat_bounds))
+    control_ds = control_ds.sel(lat=slice(*lat_bounds))
+    
     if variable == 'sic':
         ds_mean = calculate_ice_earth_fraction(ds)
         control_mean = calculate_ice_earth_fraction(control_ds)
@@ -50,6 +53,9 @@ def calculate_global_value(ds: xr.Dataset, control_ds: xr.Dataset, variable:str)
         ds_mean = ds_anom.clima_ds.space_mean() 
     
     return ds_mean.compute(), control_mean.compute()
+
+
+
 
 
 def dask_percentile(array: np.ndarray, axis: str, q: float):
@@ -440,6 +446,123 @@ def pattern_correlation_of_models(da: xr.DataArray, logginglevel='ERROR') -> pd.
 
 
 
+def get_stable_arg(values: np.ndarray, window: int) -> int:
+    '''
+    Calculates when the data first becomes stable given an array of unstable signal to noise
+    Parameters
+    ----------
+    values: np.ndarray
+        Unstable signal to noise values
+    window: int
+        Then window length which this was calculated over.
+    
+    Returns
+    --------
+    stable_arg: int
+        The arguement when the data first becomes stable. 
+    
+    '''
+    window = window/2
+    condition = np.where(np.isfinite(values), True, False)
+    
+    condition_groupby = []
+    for key, group in itertools.groupby(condition):
+        condition_groupby.append((key, len(list(group))))
+    
+    # The arguements where stablilitity occurs
+    condition_groupby_stable_arg = [i for i,(key,length) in enumerate(condition_groupby) 
+                           if not key and length > window]
+    if len(condition_groupby_stable_arg) > 0:
+        condition_groupby_stable_arg = condition_groupby_stable_arg[0]
+    else:
+        return np.nan
+        
+    
+    stable_arg = np.sum([length for key, length in condition_groupby[:condition_groupby_stable_arg]])
+#     stable_arg = stable_arg - 1
+    
+    return int(stable_arg)
+
+
+def get_multi_window_stable_arg(da: xr.DataArray):
+    '''
+    Xarray dataset with window as one of the coordinats and time as another coordinate
+    
+
+    TODO: Can this be repalced with something along the lines of 
+    np.apply_along_axis(get_stable_arg, da.get_axis_num('time'), da).shape
+    '''
+    
+    # Loop through all windows and get the stable arguement
+    stable_points = []
+    for window in da.window.values:
+        first_stable = get_stable_arg(da.sel(window=window).values, 
+                                              float(da.sel(window=window).window.values))
+        stable_points.append(first_stable)
+    
+    # Convert from arguement to time stampe
+    # time = da.time.values
+    # stable_point_time = [time[pt] if np.isfinite(pt) else time[-1] for pt in stable_points]
+    
+    # Add values to xarray dataset that has no time dim.
+    da_stable_point = xr.zeros_like(da.isel(time=0)).drop('time')
+    da_stable_point.values = stable_points#stable_point_time
+
+    da_stable_point = da_stable_point.to_dataset(name='time')
+    
+    return da_stable_point
+
+
+def get_stable_point_all_datavars(ds: xr.Dataset) -> xr.Dataset:
+    '''
+    Loops over all data vara and gets the point (timestamp when the mdoe becomes stable)
+    
+    Parameters
+    ----------
+    ds: xr.Dataset
+        A dataset with data_vars that are to be looped over. 
+    
+    Returns
+    -------
+    stable_point_ds: xr.Dataset
+        A dataset with a new coordinate model (input ds has models as data_vars).
+    
+    '''
+    
+    # TODO: The can be done in parallel.
+    data_vars = list(ds.data_vars)
+    to_concat = []
+    for dvar in data_vars:
+        da = ds[dvar]
+        da_stable_point = get_multi_window_stable_arg(da)
+        da_stable_point = da_stable_point.expand_dims('model').assign_coords(model=('model', [dvar]))
+        to_concat.append(da_stable_point)
+    
+    stable_point_ds = xr.concat(to_concat, dim='model')
+    return stable_point_ds
+
+
+def convert_from_arg_to_time(arg:int, time: list):
+    '''Can be used with xr.apply_ufunc to convert all values of the year when a model for a window stabilises
+    to the date time
+    functools.parital is also needed for this to work
+    convert_from_arg_to_time = partial(convert_from_arg_to_time, time=stable_sn_ds.time.values)
+    
+    '''
+    return time[arg]
+
+ 
+
+def get_upper_lim(ds, max_window):
+    '''Based upon the max length of a model, get the upper x-lim'''
+    lengths = []
+    for dvar in (ds.data_vars):
+        da_len = len(ds[dvar].dropna(dim='time').time.values)
+        lengths.append(da_len)
+    max_length = np.max(lengths)
+    
+    max_effective = max_length - max_window
+    return max_effective
 # def global_sn(
 #     da: xr.DataArray,  control: xr.DataArray,
 #     da_loess: Optional[xr.DataArray] = None,

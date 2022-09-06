@@ -57,16 +57,40 @@ VARIABLE_INFO = variables = {
 
 
 MODEL_PARAMS = {
-    'ccsm3':    {'ECS' : 2.57, 'color': 'limegreen'},
-    'cesm104':  {'ECS' : 3.20, 'color': 'green'},
-    'cnrmcm61': {'ECS' : 4.83, 'color': 'forestgreen'},
-    'hadcm3l':  {'ECS' : 3.34, 'color': 'palegreen'},
-    'ipslcm5a': {'ECS' : 4.76, 'color': 'olive'},
-    'mpiesm11': {'ECS' : 3.42, 'color': 'chartreuse'},
-    'mpiesm12': {'ECS' : 2.94, 'color': 'goldenrod'}, #yellowgreen
-    'gisse2r':  {'ECS' : 2.44, 'color': 'springgreen'}
+    'gisse2r':  {'ECS' : 2.44, 'color': '#94FB33'}, # springgreen
+    'ccsm3':    {'ECS' : 2.57, 'color': '#A0E24C'},#limegreen
+    'mpiesm12': {'ECS' : 2.94, 'color': '#ACC865'},#goldenrod
+    'cesm104':  {'ECS' : 3.20, 'color': '#B8AF7E'}, #blueviolet
+    'hadcm3l':  {'ECS' : 3.34, 'color': '#C49597'}, #forestgreen
+    'mpiesm11': {'ECS' : 3.42, 'color': '#D07CB0'},#chartreuse
+    'ipslcm5a': {'ECS' : 4.76, 'color': '#DC62C9'},#olive
+    'cnrmcm61': {'ECS' : 4.83, 'color': '#F42FFB'},#fuchsia
 
 }
+
+HEMISPHERE_LAT = {'northern_hemisphere': (0,90), 'southern_hemisphere': (-90,0), 'global': (None, None)}
+
+
+EXPERIMENTS_TO_RUN = [
+    {'variable': 'tas', 'mask': None, 'hemisphere': 'global'},
+    {'variable': 'tas', 'mask': 'land', 'hemisphere': 'global'},
+    {'variable': 'pr', 'mask': None, 'hemisphere': 'global'},
+    {'variable': 'pr', 'mask': 'land', 'hemisphere': 'global'},
+    {'variable': 'tos', 'mask': 'sea', 'hemisphere': 'global'},
+]
+
+# SIC GLobal calculations are incorrect. Removing unitl fix has been implemented.
+#     {'variable': 'sic', 'mask': 'sea', 'hemisphere': 'global'},
+#     {'variable': 'sic', 'mask': 'sea', 'hemisphere': 'northern_hemisphere'},
+#     {'variable': 'sic', 'mask': 'sea', 'hemisphere': 'southern_hemisphere'}
+
+
+
+# This was created using: open_ds.get_models_longer_than_length()
+# 'cesm104' removed as it has too short of a length for all variables but temperature.
+LONGRUNMIP_MODELS = ['ccsm3', 'cnrmcm61', 'hadcm3l', 'ipslcm5a', 'mpiesm11', 'mpiesm12']
+
+
 
 
 

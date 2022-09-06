@@ -11,8 +11,9 @@ from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
 from typing import Dict
 import exceptions
 from constants import MODEL_PARAMS
-
+from pprint import pprint, pformat
 import sys,logging
+import utils
 logging.basicConfig(format="%(message)s", filemode='w', stream = sys.stdout)
 logger = logging.getLogger()
 
@@ -108,7 +109,9 @@ def temperature_vs_sn_plot(ax,
     return [ax, ax2]
 
 
-def sn_plot_kwargs(kwargs):
+def sn_plot_kwargs(kwargs, logginglevel='ERROR'):
+    
+    utils.change_logging_level(logginglevel)
     # The default plot kwargs
     plot_kwargs = dict(height = 15, width = 7, hspace=0.3, vmin = -8, vmax = 8, step = 2, 
                       cmap = 'RdBu_r', line_color = 'limegreen', line_alpha = 0.65, 
@@ -158,8 +161,7 @@ def sn_plot_kwargs(kwargs):
         cbar_ticks = kwargs['ax2_ylabel']
    
     
-    print(plot_kwargs)
-    print('\n')
+    logger.info(pformat(plot_kwargs))
     return plot_kwargs
 
 
@@ -191,9 +193,24 @@ def sn_multi_window_in_time(unstable_sn_multi_window_da: xr.DataArray,
     cbar_label = 'S/N', cbartick_offset = 0, title='', label_size = 12, extend='both', 
     xlowerlim = None, xupperlim = None
     '''
-    eval(f'logging.getLogger().setLevel(logging.{logginglevel})')
+    utils.change_logging_level(logginglevel)
     # Upadting the plot kwargs
-    plot_kwargs = sn_plot_kwargs(kwargs)
+    plot_kwargs = sn_plot_kwargs(kwargs, logginglevel)
+    
+    
+    # TODO: DRYER way of doing this.
+    unstable_sn_multi_window_da = unstable_sn_multi_window_da.isel(
+        time=slice(plot_kwargs['xlowerlim'], plot_kwargs['xupperlim']))
+    unstable_sn_multi_window_da['time'] = unstable_sn_multi_window_da.time.dt.year.values
+    
+    stable_sn_multi_window_da = stable_sn_multi_window_da.isel(
+        time=slice(plot_kwargs['xlowerlim'], plot_kwargs['xupperlim']))
+    stable_sn_multi_window_da['time'] = stable_sn_multi_window_da.time.dt.year.values
+
+    
+    abrupt_anom_smean = abrupt_anom_smean.isel(
+        time=slice(plot_kwargs['xlowerlim'], plot_kwargs['xupperlim']))
+    abrupt_anom_smean['time'] = abrupt_anom_smean.time.dt.year.values
     
 
     fig = plt.figure(figsize = (plot_kwargs['height'], plot_kwargs['width']))
@@ -202,8 +219,7 @@ def sn_multi_window_in_time(unstable_sn_multi_window_da: xr.DataArray,
 
     ### Window
     ax1 = fig.add_subplot(gs[0])
-
-    
+   
     # The plot doesn't accept values equal to the upper bound. E.g if upper bounds is
     # 100, and there is a value of 100, then this won't be plotted. Thus, any values less
     # than the upper bound are kept, but if equal to the upper bounds, a nominal amount
@@ -214,10 +230,10 @@ def sn_multi_window_in_time(unstable_sn_multi_window_da: xr.DataArray,
             unstable_sn_multi_window_da < plot_kwargs['vmax']), plot_kwargs['vmax'] - .01)
     
     
-    cs = unstable_sn_multi_window_da.plot(levels= plot_kwargs['levels'], cmap = plot_kwargs['cmap'], 
+    cs = unstable_sn_multi_window_da.plot(ax=ax1, levels=plot_kwargs['levels'], cmap = plot_kwargs['cmap'], 
                                           extend=plot_kwargs['extend'], add_colorbar=False)
 
-    stable_sn_multi_window_da.plot(cmap='gist_gray', extend=plot_kwargs['extend'],
+    stable_sn_multi_window_da.plot(ax=ax1, cmap='gist_gray', extend=plot_kwargs['extend'],
                          alpha = 0.15, add_colorbar=False)
 
     ax1.set_ylabel('Window length (years)', size = plot_kwargs['label_size'])
@@ -248,10 +264,17 @@ def sn_multi_window_in_time(unstable_sn_multi_window_da: xr.DataArray,
     if len(data_vars) == 1:
         ax2.spines['right'].set_color(plot_kwargs['line_color'])
         ax2.tick_params(axis='y', colors=plot_kwargs['line_color'])
+    
+    time = abrupt_anom_smean.time.values # .dt.year
+    logger.info(f'{data_vars=}')
+    models = [model for model in list(MODEL_PARAMS) if model in data_vars]
+    
+    if len(models) == 0:
+        logger.error(f'No matching models found {data_vars=}')
+        models = data_vars
 
-    print(f'{data_vars=}')
-    for i, dvar in enumerate(data_vars):
-        print(str(i) + ' ', end='')
+    for i, dvar in enumerate(models):
+        logger.debug(f'{i} {dvar}, ')
         
         if dvar in list(MODEL_PARAMS):
             c = MODEL_PARAMS[dvar]['color']
@@ -265,31 +288,23 @@ def sn_multi_window_in_time(unstable_sn_multi_window_da: xr.DataArray,
             ECS = MODEL_PARAMS[dvar]['ECS']
             label += f' ({ECS}K)' 
             
-        ax2.plot(da.time.dt.year.values, da.values,
-                 alpha= plot_kwargs['line_alpha'], zorder=1000, label=label, linewidth = 2, 
+        ax2.plot(time, da.values,
+                 alpha= plot_kwargs['line_alpha'], zorder=1000, label=label, linewidth = 2,  
                 c = c)
 
-
-    
-    # Only add a legend if there are multiple data vars
     if len(data_vars) > 1:
-        if 'cbar_ncols' in plot_kwargs:
-            ncol = plot_kwargs['cbar_ncols']
-        else:
-            ncol = len(data_vars)
-        leg = ax2.legend(ncol=ncol, fontsize = 12)
+        leg = ax2.legend(ncol=1, fontsize = 12, bbox_to_anchor=[1.04,1])
         leg.set_title('Model')
         leg.get_title().set_fontsize('12')
 
-    ### General
     ax2.set_ylabel(plot_kwargs['ax2_ylabel'], size =12);
-
-    ax1.set_xlabel('Time (years)', size =plot_kwargs['label_size'])
-    ax1.xaxis.set_minor_locator(mticker.MultipleLocator(50))
-    ax1.set_title(plot_kwargs['title'], fontsize=15)
-
     ax1.set_xlim(plot_kwargs['xlowerlim'], plot_kwargs['xupperlim'])
+    ax1.set_xlabel('Time (years)', size =plot_kwargs['label_size'])
+    ax1.set_title('')
+    ax2.set_title('')
     
+    fig.suptitle(plot_kwargs['title'], fontsize=15, y=0.92)
+  
     return (fig, ax1, ax2, ax3, cbar)
 
 

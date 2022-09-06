@@ -556,7 +556,7 @@ class SignalToNoiseDS:
         unstable_sn_dict = {}
 
         for dvar in data_vars:
-            logger.error(dvar)
+            logger.error(f'\n===={dvar}\n')
 
             # Making sure it doesn't fail
             try:
