@@ -16,6 +16,80 @@ import sys,logging
 import utils
 logging.basicConfig(format="%(message)s", filemode='w', stream = sys.stdout)
 logger = logging.getLogger()
+sys.path.append('../')
+import constants
+experiment_colors = {'tas_global': 'red', 'tas_land_global': 'lightcoral',
+                     'pr_global': 'brown', 'pr_land_global': 'peru', 
+                    'sic_sea_global': 'blue', 'sic_sea_northern_hemisphere': 'darkblue',
+                       'sic_sea_southern_hemisphere': 'cornflowerblue', 'tos_sea_global': 'orange'}
+
+
+def highlight_plot(ax, ds, ds_highlight=None, legend_on:bool =True, yaxis_right:bool=False, label=None,
+                  color='tomato', highlight_color='darkred', bbox_to_anchor = [-0.03, 1]):
+    '''Plots a line a dash line with the option of another solid line being plotted over the top'''
+    if yaxis_right:
+        ax.yaxis.tick_right()
+        ax.yaxis.set_label_position('right')
+        color = 'green'
+        highlight_color = 'darkgreen'
+        bbox_to_anchor = [-0.03, 0.8] # 1.19 for rhs
+        
+
+    ax.plot(ds.time.values, ds.values,
+             color = color, alpha = 0.4, label  = 'Unstable', linestyle='--')
+    
+    if isinstance(ds_highlight, xr.DataArray):
+        ax.plot(ds_highlight.time.values, ds_highlight.values,
+                 color = highlight_color, alpha = 0.8, label  = 'Stable')
+    else:
+        legend_on = False # Turn legend off if only one line
+    c1 = plt.gca().lines[0].get_color()
+    ax.set_ylabel(label, fontsize = 16,
+                   color = c1, rotation = 0, labelpad = 55);
+    
+    if legend_on:
+        leg = ax.legend(ncol=1, fontsize=15, bbox_to_anchor=bbox_to_anchor, frameon=True)
+        leg.set_title(label)
+        leg.get_title().set_fontsize('15')
+        
+    major_ticks, minor_ticks = utils.get_tick_locator(ds.values)
+    
+    
+    ax.yaxis.set_major_locator(mticker.MultipleLocator(major_ticks))
+    ax.yaxis.set_minor_locator(mticker.MultipleLocator(minor_ticks))
+    ax.tick_params(axis = 'y', labelsize=14, labelcolor = c1)
+    
+    ax.set_xlim(ds.time.values[0], ds.time.values[-1])
+
+
+def two_line_highlight_plot(left_ds:xr.DataArray=None, 
+                            right_ds:xr.DataArray=None,
+                            left_highlight_ds:xr.DataArray=None,
+                            right_highlight_ds:xr.DataArray=None, 
+                            left_label = None, right_label=None,
+                            bounds:Dict[str, float] = None):
+    plt.style.use('seaborn-darkgrid')
+
+    fig = plt.figure(figsize=  (15,10))
+    ax1 = fig.add_subplot(111)
+    
+    if isinstance(left_ds, xr.DataArray):
+        highlight_plot(ax1, left_ds, ds_highlight = left_highlight_ds,
+                       label=left_label)
+        
+    ax2 = ax1.twinx()
+    if isinstance(right_ds, xr.DataArray):
+        highlight_plot(ax2, right_ds, ds_highlight = right_highlight_ds,
+                       yaxis_right=True, label=right_label)
+        
+    if isinstance(bounds, dict):
+        for key, value in bounds.items():
+            ax1.plot([left_ds.time.values[0], left_ds.time.values[-1]], [value, value], 
+                   color='tomato', linestyle=':', alpha=0.8)
+        
+    return fig, ax1, ax2
+
+
 
 
 def temperature_vs_sn_plot(ax,
@@ -24,89 +98,25 @@ def temperature_vs_sn_plot(ax,
                            temp_highlight:xr.DataArray=None,
                            sn_highlight:xr.DataArray=None,
                           bounds:Dict[str, float] = None):
-    '''
-    Plot the temperature and signal_to_noise (could also be just
-    signal or just noise)
-    
-    Parameters
-    ----------
-    ax: matplotlib axis
-    sn, temp: temp_highlight=None, sn_highlight=None: xr.DataArray
-    
-    Returns
-    --------
-    
-    [ax, ax2]: matplotlib axis
-    
-    All datasets in this plot are xr.DataArrays.
-    *_highlight are optiononal parameters that can be added to highligh certain
-    sections of the plot
-    
-    '''    
-    
-#     mpl.rcParams.update(mpl.rcParamsDefault)
+    print('!!!!!!! Warning: This is a legacy function and is no longer supported.')
+    print('Please use two_line_highlight_plot is sn_plotting')
     plt.style.use('seaborn-darkgrid')
 
-    ax.plot(sn.time.values,sn.values, label = 'Unstable', c = 'tomato', linestyle='--')
-    if isinstance(sn_highlight, xr.DataArray):
-        ax.plot(sn_highlight.time.values,sn_highlight.values, label = 'Stable', c = 'darkred')
-
-
-    c0 = plt.gca().lines[0].get_color()
-    ax.tick_params(axis = 'y', labelcolor = c0)
-    ax.set_ylabel('Signal to Noise', fontsize = 16, color = c0, rotation = 0, labelpad = 55);
+    if isinstance(sn, xr.DataArray):
+        highlight_plot(ax, sn, ds_highlight = sn_highlight,
+                       label='Signal\to\nNoise')
     
+    ax2 = ax.twinx()
+    highlight_plot(ax2, temp, ds_highlight = temp_highlight,
+                   yaxis_right=True, label='GMST\nAnomaly'+ r' ($^{\circ}$C)')
     
-        
     if isinstance(bounds, dict):
         for key, value in bounds.items():
-            ax.plot([temp.time.values[0], temp.time.values[-1]], [value, value], 
-                   color=c0, linestyle=':', alpha=0.8)
+            ax.plot([sn.time.values[0], sn.time.values[-1]], [value, value], 
+                   color='tomato', linestyle=':', alpha=0.8)
     
-    leg = ax.legend(ncol = 1, fontsize = 15, bbox_to_anchor = [-0.03, 1])
-    leg.set_title('S/N')
-    leg.get_title().set_fontsize('15')
+    return ax, ax2
 
-    ax.yaxis.set_major_locator(mticker.MultipleLocator(.5))
-    ax.yaxis.set_minor_locator(mticker.MultipleLocator(.25))
-
-    # Second y-axis: the temperature anomalies.
-    ax2 = ax.twinx()
-
-    ax2.plot(temp.time.values, temp.values,
-             color = 'green', alpha = 0.4, label  = 'Unstable', linestyle='--')
-    
-    if isinstance(temp_highlight, xr.DataArray):
-        ax2.plot(temp_highlight.time.values, temp_highlight.values,
-                 color = 'darkgreen', alpha = 0.8, label  = 'Stable')
-
-    c1 = plt.gca().lines[0].get_color()
-
-    ax2.spines['right'].set_color(c1)
-    ax2.spines['left'].set_color(c0)
-    ax2.set_ylabel('Tempearture\nAnomaly'+ r' ($^{\circ}$C)', fontsize = 16,
-                   color = c1, rotation = 0, labelpad = 55);
-    
-    leg2 = ax2.legend(ncol = 1, fontsize = 15, bbox_to_anchor = [-0.03, 0.8]) # 1.19 for rhs
-    leg2.set_title('Temperature\nAnomaly')
-    leg2.get_title().set_fontsize('15')
-    
-    
-    ax2.yaxis.set_major_locator(mticker.MultipleLocator(.5))
-    ax2.yaxis.set_minor_locator(mticker.MultipleLocator(.25))
-    ax.yaxis.set_major_locator(mticker.MultipleLocator(2))
-    ax.yaxis.set_minor_locator(mticker.MultipleLocator(1))
-    ax2.tick_params(axis = 'y', labelsize=14, labelcolor = c1)
-    ax.tick_params(axis='y', labelsize=14)
-    ax.tick_params(axis='x', labelsize=14)
-    
-    
-    ax.set_xlabel('Year', fontsize = 16);
-    ax.set_xlim(temp.time.values[0], temp.time.values[-1])
-    ax2.set_xlim(temp.time.values[0], temp.time.values[-1])
-
-    
-    return [ax, ax2]
 
 
 def sn_plot_kwargs(kwargs, logginglevel='ERROR'):
@@ -319,7 +329,7 @@ def format_plot(fig, ax):
     gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True)
     gl.xformatter = LONGITUDE_FORMATTER
     gl.yformatter = LATITUDE_FORMATTER
-    gl.right_labels = False
+    gl.left_labels = False
     gl.top_labels = False
 
 
@@ -380,3 +390,132 @@ def plot_all_period_maps(ds, periods, suptitle = 'Percent of Years That are Stab
     cbar = format_colorbar(gs, pcolor)
     
     return fig, gs, cbar
+
+
+
+def plot_year_of_stability(ds: xr.Dataset, varible_to_loop: str, title:str=None):
+    '''
+    Plots the year of stability for different window lenght. This can be 
+    for any variable that is stored as a coordinte. 
+    
+    ds: xr.Dataset
+        
+    
+    '''
+    
+    plt.style.use('seaborn-darkgrid')
+    fig = plt.figure(figsize=(8, 8))
+    ax = fig.add_subplot(111)
+
+    for variable in ds[varible_to_loop].values:
+        color = experiment_colors[variable]
+        label = variable.replace('_', ' - ').replace('sea -', '')
+
+        da = ds.sel(variable=variable).time.plot(ax=ax,y='window', label=label,
+                                                linewidth=1.5, color=color, alpha=0.8)
+    if title is None:
+        model = str(ds.model.values)
+        ECS = f' (ECS={constants.MODEL_PARAMS[model]["ECS"]}K)'
+        title = f'{model} Year of Stabilisation {ECS}'
+        
+    ax.set_title(title, fontsize=15)
+
+
+    ax.legend(fontsize=15)
+    ax.set_xlim(-1, np.max(ds.time.values))
+    ax.set_ylim(np.min(ds.window.values), np.max(ds.window.values))
+    
+    return fig, ax
+
+
+
+
+# def temperature_vs_sn_plot(ax,
+#                            sn:xr.DataArray=None,
+#                            temp:xr.DataArray=None,
+#                            temp_highlight:xr.DataArray=None,
+#                            sn_highlight:xr.DataArray=None,
+#                           bounds:Dict[str, float] = None):
+#     '''
+#     Plot the temperature and signal_to_noise (could also be just
+#     signal or just noise)
+    
+#     Parameters
+#     ----------
+#     ax: matplotlib axis
+#     sn, temp: temp_highlight=None, sn_highlight=None: xr.DataArray
+    
+#     Returns
+#     --------
+    
+#     [ax, ax2]: matplotlib axis
+    
+#     All datasets in this plot are xr.DataArrays.
+#     *_highlight are optiononal parameters that can be added to highligh certain
+#     sections of the plot
+    
+#     '''    
+    
+# #     mpl.rcParams.update(mpl.rcParamsDefault)
+#     plt.style.use('seaborn-darkgrid')
+
+#     ax.plot(sn.time.values,sn.values, label = 'Unstable', c = 'tomato', linestyle='--')
+#     if isinstance(sn_highlight, xr.DataArray):
+#         ax.plot(sn_highlight.time.values,sn_highlight.values, label = 'Stable', c = 'darkred')
+
+
+#     c0 = plt.gca().lines[0].get_color()
+#     ax.tick_params(axis = 'y', labelcolor = c0)
+#     ax.set_ylabel('Signal to Noise', fontsize = 16, color = c0, rotation = 0, labelpad = 55);
+    
+    
+        
+#     if isinstance(bounds, dict):
+#         for key, value in bounds.items():
+#             ax.plot([temp.time.values[0], temp.time.values[-1]], [value, value], 
+#                    color=c0, linestyle=':', alpha=0.8)
+    
+#     leg = ax.legend(ncol = 1, fontsize = 15, bbox_to_anchor = [-0.03, 1])
+#     leg.set_title('S/N')
+#     leg.get_title().set_fontsize('15')
+
+#     ax.yaxis.set_major_locator(mticker.MultipleLocator(.5))
+#     ax.yaxis.set_minor_locator(mticker.MultipleLocator(.25))
+
+#     # Second y-axis: the temperature anomalies.
+#     ax2 = ax.twinx()
+
+#     ax2.plot(temp.time.values, temp.values,
+#              color = 'green', alpha = 0.4, label  = 'Unstable', linestyle='--')
+    
+#     if isinstance(temp_highlight, xr.DataArray):
+#         ax2.plot(temp_highlight.time.values, temp_highlight.values,
+#                  color = 'darkgreen', alpha = 0.8, label  = 'Stable')
+
+#     c1 = plt.gca().lines[0].get_color()
+
+#     ax2.spines['right'].set_color(c1)
+#     ax2.spines['left'].set_color(c0)
+#     ax2.set_ylabel('Tempearture\nAnomaly'+ r' ($^{\circ}$C)', fontsize = 16,
+#                    color = c1, rotation = 0, labelpad = 55);
+    
+#     leg2 = ax2.legend(ncol = 1, fontsize = 15, bbox_to_anchor = [-0.03, 0.8]) # 1.19 for rhs
+#     leg2.set_title('Temperature\nAnomaly')
+#     leg2.get_title().set_fontsize('15')
+    
+    
+#     ax2.yaxis.set_major_locator(mticker.MultipleLocator(.5))
+#     ax2.yaxis.set_minor_locator(mticker.MultipleLocator(.25))
+#     ax.yaxis.set_major_locator(mticker.MultipleLocator(2))
+#     ax.yaxis.set_minor_locator(mticker.MultipleLocator(1))
+#     ax2.tick_params(axis = 'y', labelsize=14, labelcolor = c1)
+#     ax2.set_xlim(temp.time.values[0], temp.time.values[-1])
+
+#     ax.tick_params(axis='y', labelsize=14)
+#     ax.tick_params(axis='x', labelsize=14)
+    
+    
+#     ax.set_xlabel('Year', fontsize = 16);
+#     ax.set_xlim(temp.time.values[0], temp.time.values[-1])
+    
+#     return ax, ax2

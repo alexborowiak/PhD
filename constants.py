@@ -21,7 +21,7 @@ MODULE_DIR = '/home/563/ab2313/Documents/PhD/modules'
 VARIABLE_INFO = variables = {
     'tas': 
     {
-        'longname': 'Near-surface air temperature',
+        'longname': 'Near-Surface Air Temperature',
         'units': r'$^{\circ}C$'
     }, 
     'pr':
@@ -44,13 +44,14 @@ VARIABLE_INFO = variables = {
     }, 
     'tos': 
     {
-        'longname': 'Sea surface temperature',
+        'longname': 'Sea Surface Temperature',
         'units':  r'$^{\circ}C$'
         
     },
     'surf': 
     {
-        'longname': 'Neat Ocean Heat Uptake'
+        'longname': 'Neat Ocean Heat Uptake',
+        'units': 'W/m^2'
     }
            }
 
@@ -77,6 +78,9 @@ EXPERIMENTS_TO_RUN = [
     {'variable': 'pr', 'mask': None, 'hemisphere': 'global'},
     {'variable': 'pr', 'mask': 'land', 'hemisphere': 'global'},
     {'variable': 'tos', 'mask': 'sea', 'hemisphere': 'global'},
+    {'variable': 'surf', 'mask': 'sea', 'hemisphere': 'global'},
+    {'variable': 'surf', 'mask': 'sea', 'hemisphere': 'northern_hemisphere'},
+    {'variable': 'surf', 'mask': 'sea', 'hemisphere': 'southern_hemisphere'},
 ]
 
 # SIC GLobal calculations are incorrect. Removing unitl fix has been implemented.
@@ -90,20 +94,12 @@ EXPERIMENTS_TO_RUN = [
 # 'cesm104' removed as it has too short of a length for all variables but temperature.
 LONGRUNMIP_MODELS = ['ccsm3', 'cnrmcm61', 'hadcm3l', 'ipslcm5a', 'mpiesm11', 'mpiesm12']
 
+MULTI_WINDOW_RUN_PARAMS = dict(start_window = 10, end_window = 152, step_window=1)
 
 
-
-
-# Old
-
-# LONGRUNMIP_RETIMED_DIR = LONGRUNMIP_DIR + '/regrid_retimestamped'
-# LONRUNMIP_LOESS_DIR = LONGRUNMIP_RETIMED_DIR + '/loess'
-# LONGRUNMIP_CONSECMET_DIR = os.path.join(LONGRUNMIP_DIR, 'consecutive_metrics')
-# ZECMIP_LOCAL_REGRIDDED_DIR= os.path.join(ZECMIP_LOCAL_DIR, 'regridded')
-
-# Subset of the models that have at least 1850 years in length
-# LONGRUMIP_MODELS_MIN_1850 = ['ccsm3', 'cesm104', 'cnrmcm61', 'famous', 'gisse2r', 'mpiesm11']
-# LONGRUNMIP_MODELS = []
-
-# Models that do not have a long enough control run.
-# MODELS_TO_DROP = ['hadgem2', 'echam5mpiom']
+# Windows that have interesing properties. These windows were decided upong from
+# the graphs of the year when models and variables stabailise in the global mean.
+WINDOWS_OF_INTEREST = [20, 80, 150]#[20, 150, 300]
+LONGRUNMIP_LENGTH = 800 # The length of the longrunmip simulations to use
+# Need to make sure all the windows have a full length
+LONGRUNMIP_EFFECTIVE_LENGTH = LONGRUNMIP_LENGTH - WINDOWS_OF_INTEREST[-1]

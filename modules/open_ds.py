@@ -51,8 +51,8 @@ def get_file_names_from_from_directory(ROOT_DIR, experiment: ExperimentTypes,
     
     utils.change_logging_level(logginglevel)
     
-    if 'signal_to_noise' in experiment.value:
-        ROOT_DIR = os.path.join(ROOT_DIR, experiment.value)
+#     if 'signal_to_noise' in experiment.value:
+#         ROOT_DIR = os.path.join(ROOT_DIR, experiment.value)
         
     logger.info(f'Getting files from {ROOT_DIR}')
     files_in_directory = os.listdir(ROOT_DIR)
@@ -76,8 +76,8 @@ def get_file_names_from_from_directory(ROOT_DIR, experiment: ExperimentTypes,
         else:
             logger.error(f'{model=} - {found_fname=} - No file found')
             
-    if 'signal_to_noise' in experiment.value:
-        paths_to_return =[os.path.join(experiment.value, fname) for fname in paths_to_return]
+#     if 'signal_to_noise' in experiment.value:
+#         paths_to_return =[os.path.join(experiment.value, fname) for fname in paths_to_return]
 
         
     return paths_to_return
@@ -282,10 +282,9 @@ def read_and_merge_netcdfs(fnames: List[str], ROOT_DIR: str = '', var:str=None,
        
     return merged_ds
 
-def get_mean_for_experiment(ROOT_DIR, experiment_params, models_to_get):
+def get_mean_for_experiment(ROOT_DIR, experiment_params, models_to_get, max_length:int=None):
     '''Gets the global mean/value of experiment and picontrol. '''
-    
-    
+
     # Directory to get files from
     VARIABLE_DIR = os.path.join(ROOT_DIR, experiment_params["variable"], 'regrid_retimestamped')
     
@@ -301,10 +300,10 @@ def get_mean_for_experiment(ROOT_DIR, experiment_params, models_to_get):
     # Opening files
 
     control_ds = read_and_merge_netcdfs(files_to_open_control, VARIABLE_DIR, 
-                                                mask=experiment_params['mask'])
+                                                mask=experiment_params['mask'], max_length = max_length)
 
     abrupt4x_ds = read_and_merge_netcdfs(files_to_open_experiment, VARIABLE_DIR,
-                                                 mask=experiment_params['mask'])
+                                                 mask=experiment_params['mask'], max_length = max_length)
 
     # Getting the glboal value (mean for all other variables other than sic)
     abrupt4x_mean,control_ds_mean = signal_to_noise.calculate_global_value(
@@ -326,7 +325,7 @@ def get_experiment_name_from_params(experiment_params: Dict[str, str]) -> str:
     return experiment_name
 
 
-def get_all_experiment_ds(experiments_to_run, directory, models_to_get):
+def get_all_experiment_ds(experiments_to_run, directory, models_to_get, max_length:int=None):
     '''
     Get all the different expereiments and merges them into a xr.Dataset. This Dataset
     has a model coodinate, and all the data vars are for each periment. The name of each si 
@@ -338,7 +337,8 @@ def get_all_experiment_ds(experiments_to_run, directory, models_to_get):
     for experiment_params in experiments_to_run:
         print(f'\n- {experiment_params}')
 
-        abrupt4x_mean, control_ds_mean = get_mean_for_experiment(directory, experiment_params, models_to_get)
+        abrupt4x_mean, control_ds_mean = get_mean_for_experiment(
+            directory, experiment_params, models_to_get, max_length=max_length)
         
         experiment_name = get_experiment_name_from_params(experiment_params)
         
@@ -570,7 +570,7 @@ def open_and_concat_nc_files(nc_files: List[str], ROOT_DIR: str='', model_index=
             model = model.split('.')[0]
         logger.debug(f'{model=}')
         da = xr.open_dataset(os.path.join(ROOT_DIR, f))
-        da = remove_unwated_coords(da)
+#         da = remove_unwated_coords(da)
 
         xr_files[model] = da
     logger.debug(f'Merging together {list(xr_files)}')
@@ -663,5 +663,18 @@ def get_all_file_names_for_model(model: str, FILE_NAME_DICT: Dict[str, List[str]
         
     return model_fname_dict
 
+def open_signal_to_noise_dataset(files, ROOT_DIR):
+    '''
+    Simple open and contat all files in a directory with a rename and squeeze
+    TODO: Remove this once figured out why model is called variable.
+    '''
+    to_concat = []
 
+    for file in files:
+        ds = (xr.open_dataset(os.path.join(ROOT_DIR, file))
+            .rename({'variable':'model'}))
+
+        to_concat.append(ds)
+        
+    return xr.concat(to_concat, dim='model')
 

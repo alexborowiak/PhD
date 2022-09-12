@@ -166,7 +166,7 @@ class SignalToNoise:
         self._obj = xarray_obj
         
     @staticmethod    
-    def loess_filter(y: np.array, window = 60,logginglevel='ERROR'):
+    def loess_filter(y: np.array,logginglevel='ERROR'):
         '''
         Applies the loess filter to a 1D numpy array.
 
@@ -199,7 +199,10 @@ class SignalToNoise:
 
         # The equally spaced x-values.
         x =  np.arange(len(y))
-
+            
+        #### !!!! HARD OVERRIDE WINDOW: Window is too long and casuing incorrect filtering
+        # Start abrupt not removed properly. Not removing window param as may cause errors
+        window = 10 # This is a good value that will detrend properly. See longrumip_01
         # The fraction to consider the linear trend of each time.
         frac = window/len(y)
 
@@ -208,17 +211,18 @@ class SignalToNoise:
 
         return yhat[:,1]
 
-    def apply_loess_filter(self, window = 60, min_periods = 0) -> xr.DataArray:
+    def apply_loess_filter(self, min_periods = 0) -> xr.DataArray:
         
         '''Applies the loess filter static method to an array through time'''
                                              
         data = self._obj
         
-        #data = data.dropna(dim='time')
+        
+#         data = data.dropna(dim='time')
            
         # Loess filter
-        loess = np.apply_along_axis(self.loess_filter, data.get_axis_num('time'), data.values,
-                                    window = window)
+        loess = np.apply_along_axis(self.loess_filter, data.get_axis_num('time'), data.values)
+         #                           window = window)
 
         # Detredning with the loess filer.
         loess_detrend = data - loess

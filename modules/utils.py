@@ -1,33 +1,23 @@
-
+import os
 import logging, sys
+
+import numpy as np
+
+from typing import Union
+
 logging.basicConfig(format="- %(message)s", filemode='w', stream=sys.stdout)
 logger = logging.getLogger()
 
-def get_notebook_logger():
-    import logging, sys
 
-#     logger = logging.getLogger()  
-#     logger_handler = logging.StreamHandler()  
-#     logger.addHandler(logger_handler)
-#     logger_handler.setFormatter(logging.Formatter('[-%(name)s -%(funcName)s -%(levelname)s] %(message)s'))
-#     logger.handlers[0].stream = sys.stdout
+def get_notebook_logger():
     import logging, sys
     logging.basicConfig(format=" - %(message)s", filemode='w', stream=sys.stdout)
     logger = logging.getLogger()
-    
-#     logger_handler = logging.StreamHandler() 
-#     logger.addHandler(logger_handler)
-#     logger_handler.setFormatter(logging.Formatter('[-%(name)s -%(funcName)s -%(levelname)s] %(message)s'))
-#     logger.handlers[0].stream = sys.stdout
-
-
-    
     return logger
 
     
 
 def change_logging_level(logginglevel: str):
-
     eval(f'logging.getLogger().setLevel(logging.{logginglevel})')
 
 def create_period_list(step: int, end:int,  start:int = 0):
@@ -79,3 +69,62 @@ def pprint_list(*args, **kwargs) -> None:
     '''A nicer print of a list with more information'''
 
     print(pprint_list_string(*args, **kwargs))
+    
+    
+def mkdir_no_error(ROOT_DIR):
+    try:
+        os.mkdir(ROOT_DIR)
+    except FileExistsError as e:
+        pass
+    
+    
+    
+def ceil_to_base(values: Union[np.ndarray, float, int], base: int) -> np.ndarray:
+    '''
+    Ceil to the nearest base.
+    E.g. 29 will ceil to 30 with base 10.
+    '''
+    return np.ceil(values/base) * base
+
+
+
+def floor_to_base(values: Union[np.ndarray, float, int], base: int)-> np.ndarray: 
+    '''
+    Floor to the nearest base.
+    E.g. 29 will ceil to 20 with base 10.
+    '''
+    return np.floor(values/base) * base
+
+
+def get_tick_locator(vals: np.ndarray, num_major_ticks: int=10, fraction_minor_ticks:int=2) -> tuple:
+    '''
+    Based upon the range of values get the major and minor tick location spacing. 
+    These are float values to be used with
+    ax.yaxis.set_major_locator(mticker.MultipleLocator(major_locations))
+    ax.yaxis.set_minor_locator(mticker.MultipleLocator(minor_location))
+    
+    Parameters
+    ---------
+    vals: np.ndarray
+        Numpy array of any shape to base the values upon
+    num_major_ticks: int
+        The number of major ticks that are wanted on the axis
+    fraction_minor_ticks: int
+        How many minor ticks between each major tick
+    '''
+    # Range of values
+    vals_range = np.nanmax(vals) - np.nanmin(vals)
+    # The order of magnitude
+    order_of_magnitude = np.floor(np.log10(np.array(vals_range)))
+    # The ceiling of this.
+    ceil_range = ceil_to_base(vals_range, 10 ** order_of_magnitude)
+    
+    # The range divided by the number of desired ticks
+    major_locations = ceil_range/num_major_ticks
+    
+    major_locations = np.ceil(major_locations)
+    
+    # Minor ticks occur fraction_minor more often
+    minor_location = major_locations/fraction_minor_ticks
+    
+    return (major_locations, minor_location)

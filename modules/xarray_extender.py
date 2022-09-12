@@ -98,7 +98,15 @@ def convert_dimension_to_data_vars(da: xr.DataArray, dim:str) -> xr.Dataset:
     return merged_ds
 
 
+def get_median_and_uncertainty_across_dim(ds: xr.Dataset, dim: str):
+    
+    median_ds = ds.median(dim=dim).rename({'time': 'median_value'})
+    uncertainty_ds = np.abs((ds.max(dim=dim) -\
+                            ds.min(dim=dim))/2)
+    
+    uncertainty_ds = uncertainty_ds.rename({'time': 'uncertainty'})
 
+    return xr.merge([median_ds, uncertainty_ds])
 
 
 
