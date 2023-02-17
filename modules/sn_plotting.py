@@ -18,10 +18,14 @@ logging.basicConfig(format="%(message)s", filemode='w', stream = sys.stdout)
 logger = logging.getLogger()
 sys.path.append('../')
 import constants
+# experiment_colors = {'tas_global': 'red', 'tas_land_global': 'lightcoral',
+#                      'pr_global': 'brown', 'pr_land_global': 'peru', 
+#                     'sic_sea_global': 'blue', 'sic_sea_northern_hemisphere': 'darkblue',
+#                        'sic_sea_southern_hemisphere': 'cornflowerblue', 'tos_sea_global': 'orange'}
+
 experiment_colors = {'tas_global': 'red', 'tas_land_global': 'lightcoral',
-                     'pr_global': 'brown', 'pr_land_global': 'peru', 
-                    'sic_sea_global': 'blue', 'sic_sea_northern_hemisphere': 'darkblue',
-                       'sic_sea_southern_hemisphere': 'cornflowerblue', 'tos_sea_global': 'orange'}
+                     'pr_global': 'green', 'pr_land_global': 'yellowgreen', 
+                     'tos_sea_global': 'blue'}
 
 
 def highlight_plot(ax, ds, ds_highlight=None, legend_on:bool =True, yaxis_right:bool=False, label=None,
@@ -44,7 +48,7 @@ def highlight_plot(ax, ds, ds_highlight=None, legend_on:bool =True, yaxis_right:
     else:
         legend_on = False # Turn legend off if only one line
     c1 = plt.gca().lines[0].get_color()
-    ax.set_ylabel(label, fontsize = 16,
+    ax.set_ylabel(label, fontsize = 18,
                    color = c1, rotation = 0, labelpad = 55);
     
     if legend_on:
@@ -58,8 +62,10 @@ def highlight_plot(ax, ds, ds_highlight=None, legend_on:bool =True, yaxis_right:
     ax.yaxis.set_major_locator(mticker.MultipleLocator(major_ticks))
     ax.yaxis.set_minor_locator(mticker.MultipleLocator(minor_ticks))
     ax.tick_params(axis = 'y', labelsize=14, labelcolor = c1)
+    ax.tick_params(axis='x', labelsize=14)
     
     ax.set_xlim(ds.time.values[0], ds.time.values[-1])
+    ax.set_xlabel('Time (Years)', fontsize=18)
 
 
 def two_line_highlight_plot(left_ds:xr.DataArray=None, 
@@ -77,10 +83,12 @@ def two_line_highlight_plot(left_ds:xr.DataArray=None,
         highlight_plot(ax1, left_ds, ds_highlight = left_highlight_ds,
                        label=left_label)
         
-    ax2 = ax1.twinx()
     if isinstance(right_ds, xr.DataArray):
+        ax2 = ax1.twinx()
         highlight_plot(ax2, right_ds, ds_highlight = right_highlight_ds,
                        yaxis_right=True, label=right_label)
+    else:
+        ax2=None
         
     if isinstance(bounds, dict):
         for key, value in bounds.items():
@@ -126,7 +134,7 @@ def sn_plot_kwargs(kwargs, logginglevel='ERROR'):
     plot_kwargs = dict(height = 15, width = 7, hspace=0.3, vmin = -8, vmax = 8, step = 2, 
                       cmap = 'RdBu_r', line_color = 'limegreen', line_alpha = 0.65, 
                        ax2_ylabel = 'Anomaly',
-                      cbar_label = 'S/N',cbartick_offset = 0,title='', label_size = 12, extend='both', 
+                      cbar_label = 'Signal-to-Noise',cbartick_offset = 0,title='', label_size = 12, extend='both', 
                       xlowerlim = None, xupperlim = None)
     
     
@@ -178,7 +186,9 @@ def sn_plot_kwargs(kwargs, logginglevel='ERROR'):
 def sn_multi_window_in_time(unstable_sn_multi_window_da: xr.DataArray, 
                             stable_sn_multi_window_da: xr.DataArray,
                             abrupt_anom_smean: Union[xr.DataArray, xr.Dataset],
-                            logginglevel='INFO',
+                            stable_point_ds:xr.Dataset = None,
+                            logginglevel='ERROR',
+                            font_scale = 1,
                             **kwargs):
     
     '''
@@ -240,20 +250,23 @@ def sn_multi_window_in_time(unstable_sn_multi_window_da: xr.DataArray,
             unstable_sn_multi_window_da < plot_kwargs['vmax']), plot_kwargs['vmax'] - .01)
     
     
+    xr.where(np.isfinite(stable_sn_multi_window_da), .4, 0).plot(ax=ax1,
+                    cmap='gist_gray_r', alpha=0.3,vmax=1, vmin=0, add_colorbar=False)
+    
     cs = unstable_sn_multi_window_da.plot(ax=ax1, levels=plot_kwargs['levels'], cmap = plot_kwargs['cmap'], 
                                           extend=plot_kwargs['extend'], add_colorbar=False)
-
-    stable_sn_multi_window_da.plot(ax=ax1, cmap='gist_gray', extend=plot_kwargs['extend'],
-                         alpha = 0.15, add_colorbar=False)
+    if stable_point_ds:
+        stable_point_ds.time.plot(y='window',  ax=ax1, color='k')
 
     ax1.set_ylabel('Window length (years)', size = plot_kwargs['label_size'])
 
     ### Colorbar
     ax3 = fig.add_subplot(gs[1])
     cbar = fig.colorbar(cs, cax = ax3, extend=plot_kwargs['extend'], orientation='horizontal')
-    cbar.set_label(plot_kwargs['cbar_label'], size =plot_kwargs['label_size'])
+    cbar.set_label(plot_kwargs['cbar_label'], size =24 * font_scale)#plot_kwargs['label_size'])
     cbar.set_ticks(plot_kwargs['cbar_ticks'])
     cbar.ax.set_xticklabels(plot_kwargs['cbar_xticklabels'])
+    cbar.ax.tick_params(labelsize=20 * font_scale)
     logger.debug(f'cbar x-tick labels = {plot_kwargs["cbar_xticklabels"]}')
 
     ### Temperature Anomaly
@@ -303,17 +316,24 @@ def sn_multi_window_in_time(unstable_sn_multi_window_da: xr.DataArray,
                 c = c)
 
     if len(data_vars) > 1:
-        leg = ax2.legend(ncol=1, fontsize = 12, bbox_to_anchor=[1.04,1])
+        leg = ax2.legend(ncol=1, fontsize = 20 * font_scale, bbox_to_anchor=[1.07,1])
         leg.set_title('Model')
-        leg.get_title().set_fontsize('12')
+        leg.get_title().set_fontsize(str(int('24')  * font_scale))
 
-    ax2.set_ylabel(plot_kwargs['ax2_ylabel'], size =12);
+    ax2.set_ylabel(plot_kwargs['ax2_ylabel'], rotation=0, size =24 * font_scale, labelpad=100 * font_scale);
+    ax1.set_ylabel('Window Length\n(Years)', fontsize=24 * font_scale, rotation=0, labelpad=100 * font_scale)
     ax1.set_xlim(plot_kwargs['xlowerlim'], plot_kwargs['xupperlim'])
-    ax1.set_xlabel('Time (years)', size =plot_kwargs['label_size'])
+    ax1.set_xlabel('Time (years)', size=24 * font_scale)#plot_kwargs['label_size'])
+    ax2.set_xlabel('Time (years)', size=24 * font_scale)#plot_kwargs['label_size'])
+
+    ax1.tick_params(axis='y', labelsize=20 * font_scale)
+    ax2.tick_params(axis='y', labelsize=20 * font_scale)
+    ax1.tick_params(axis='x', labelsize=20 * font_scale)
+
     ax1.set_title('')
     ax2.set_title('')
     
-    fig.suptitle(plot_kwargs['title'], fontsize=15, y=0.92)
+    fig.suptitle(plot_kwargs['title'], fontsize=18, y=0.92)
   
     return (fig, ax1, ax2, ax3, cbar)
 
@@ -404,12 +424,13 @@ def plot_year_of_stability(ds: xr.Dataset, varible_to_loop: str, title:str=None)
     '''
     
     plt.style.use('seaborn-darkgrid')
-    fig = plt.figure(figsize=(8, 8))
+    fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111)
 
     for variable in ds[varible_to_loop].values:
         color = experiment_colors[variable]
         label = variable.replace('_', ' - ').replace('sea -', '')
+        label = label.replace('- global', '')
 
         da = ds.sel(variable=variable).time.plot(ax=ax,y='window', label=label,
                                                 linewidth=1.5, color=color, alpha=0.8)
@@ -418,18 +439,132 @@ def plot_year_of_stability(ds: xr.Dataset, varible_to_loop: str, title:str=None)
         ECS = f' (ECS={constants.MODEL_PARAMS[model]["ECS"]}K)'
         title = f'{model} Year of Stabilisation {ECS}'
         
-    ax.set_title(title, fontsize=15)
+    ax.set_title(title, fontsize=25)
 
 
-    ax.legend(fontsize=15)
+#     ax.legend(fontsize=25)
+    leg = ax.legend(ncol=1, frameon=True, facecolor='white', fontsize=18) # , bbox_to_anchor=[1, 0.857]
+    leg.set_title('Variable')
+    leg.get_title().set_fontsize('18')
     ax.set_xlim(-1, np.max(ds.time.values))
     ax.set_ylim(np.min(ds.window.values), np.max(ds.window.values))
+    ax.set_xlabel('Year of Stabilisation', fontsize=18)
+    ax.set_ylabel('Window Length (years)', fontsize=18)
+    ax.tick_params(axis='y', labelsize=14)
+    ax.tick_params(axis='x', labelsize=14)
+#     ax.set_xlabel('Year of Stabilisation', fontsize=18)
+#     ax.set_ylabel('Window lengths (years)', fontsize=18)
     
     return fig, ax
 
+def local_stabilisation_average_year_and_uncertainty_plot(ds, plot_dict, suptitle=None, cmap='Reds'):
+    '''
+    ds: xr.Dataset
+        Coords: window, lat, lat
+        Data vars: median_value, uncertainty
+    plot_dict:
+        dictionary of values for plot
+    '''
+    windows = ds.window.values
+
+    fig = plt.figure(figsize=(8.3 * len(windows), 12))
+    
+    gs = gridspec.GridSpec(3, len(windows), height_ratios=[0.2, 1,1])
+
+    axes = []
+    plots = []
+
+    if suptitle:
+        fig.suptitle(suptitle, fontsize=25)
+
+    y_axis_kwargs = dict(xy=(-0.05, 0.5), ha='center', va='center', xycoords='axes fraction', 
+                       rotation=90, size=18)
+
+    for plot_num, window in enumerate(windows):    
+
+        ax = fig.add_subplot(gs[1, plot_num], projection=ccrs.PlateCarree())
+        da = ds.sel(window=window).median_value
+        plot = da.plot(ax=ax, cmap=cmap, add_colorbar=False, levels=plot_dict[window]['levels'])
+
+        ax.coastlines()
+        ax.set_title(f'{window} Year Window', fontsize=18)
+        format_plot(fig, ax)
+
+        if not plot_num:
+            ax.annotate('Mean', **y_axis_kwargs)
+
+        axes.append(ax)
+        plots.append(plot)
+
+    for plot_num, window in enumerate(windows):
+
+        ax = fig.add_subplot(gs[2, plot_num], projection=ccrs.PlateCarree())
+        da = ds.sel(window=window).uncertainty
+        plot = da.plot(ax=ax, cmap=cmap, add_colorbar=False)
+        ax.coastlines()
+        format_plot(fig, ax)
+
+        if not plot_num:
+            ax.annotate('Uncertainty', **y_axis_kwargs)
+
+        ax.set_title('')
+        axes.append(ax)
+        plots.append(plot)
 
 
+    for plot_num, plot in enumerate(plots[:len(windows)]):
+        cax = plt.subplot(gs[0, plot_num])
+        cbar = plt.colorbar(plot, cax=cax, orientation='horizontal')
+        cbar.ax.set_title('Year of Stabilisation', fontsize=18)
+        cbar.ax.tick_params(labelsize=14)
+    return fig
 
+def plot_all_model_multi_window_maps(ds, variable, plot_dict, cmap='Reds', extend='max'):
+
+    print(plot_dict)
+    
+    windows = ds.window.values
+    models = ds.model.values
+    num_cols = len(windows)
+    num_rows = len(models)
+
+    fig = plt.figure(figsize=(6*num_cols, 4.*num_rows))
+    gs = gridspec.GridSpec(num_rows+1, num_cols, height_ratios = [0.2] + [1] * num_rows,
+                           hspace=0.2, wspace=0.2)
+
+    fig.suptitle(f'{constants.VARIABLE_INFO[variable]["longname"]} Year of Stabilisation', 
+                fontsize=25, y=.91)
+
+    axes = []
+    plots = []
+
+    y_axis_kwargs = dict(xy=(-0.05, 0.5), ha='center', va='center', xycoords='axes fraction', 
+                       rotation=90, size=18)
+
+    for row, model in enumerate(models):
+        for col, window in enumerate(windows):
+            ax = fig.add_subplot(gs[row+1, col], projection=ccrs.PlateCarree())
+            da = ds.time.sel(window=window, model=model)
+            plot = da.plot(ax=ax, cmap=cmap, levels = plot_dict[window]['levels'], 
+                           add_colorbar=False, extend=extend)
+            ax.set_title('')
+            if not col:
+                ax.annotate(f'{model}', **y_axis_kwargs)
+            ax.coastlines()
+            format_plot(fig, ax)
+            axes.append(ax)
+            plots.append(plot)
+
+    for window,ax in zip(windows, axes[:len(windows)]):
+        ax.set_title(f'{window} Year Window', fontsize=18)
+
+    for plot_num, plot in enumerate(plots[:len(windows)]):
+        cax = plt.subplot(gs[0, plot_num])
+        cbar = plt.colorbar(plot, cax=cax, orientation='horizontal')
+        cbar.ax.set_title('Year of Stabilisation', fontsize=18)
+        cbar.ax.tick_params(labelsize=14)
+        
+    return fig, axes, plots
 # def temperature_vs_sn_plot(ax,
 #                            sn:xr.DataArray=None,
 #                            temp:xr.DataArray=None,

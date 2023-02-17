@@ -21,8 +21,8 @@ import xarray_class_accessors as xca
 import utils
 from typing import List
 
-import statsmodels.api as sm 
-lowess = sm.nonparametric.lowess
+# import statsmodels.api as sm 
+# lowess = sm.nonparametric.lowess
 
 logger = utils.get_notebook_logger()
 
@@ -34,29 +34,30 @@ def calculate_ice_earth_fraction(ds: xr.Dataset) -> xr.Dataset:
     global_frac_ds = ds.sum(dim=['lat', 'lon'])/ocean_as_1_ds.sum(dim=['lat', 'lon'])
     return global_frac_ds
 
-def calculate_global_value(ds: xr.Dataset, control_ds: xr.Dataset, variable:str, lat_bounds:tuple=(None,None)):
+def calculate_global_value(ds: xr.Dataset, control_ds: xr.Dataset, variable:str, lat_bounds:tuple=None,
+                          experiment_params=None):
     '''Calculates anomalies and mean.'''
+
+    
+    if not lat_bounds and not experiment_params: lat_bounds = (None,None)
+    # It's easier to just pass the expereimtn_params_dict
+    if isinstance(experiment_params, dict): lat_bounds = constants.HEMISPHERE_LAT[experiment_params['hemisphere']]
+    print(lat_bounds)
+    
     ds = ds.sel(lat=slice(*lat_bounds))
     control_ds = control_ds.sel(lat=slice(*lat_bounds))
-    
     if variable == 'sic':
         ds_mean = calculate_ice_earth_fraction(ds)
         control_mean = calculate_ice_earth_fraction(control_ds)
 
     else:
-
-
         # Space mean and anomalmies
         ds_anom = ds.clima_ds.anomalies(historical_ds=control_ds)
         
         control_mean = control_ds.clima_ds.space_mean()
         ds_mean = ds_anom.clima_ds.space_mean() 
     
-    return ds_mean.compute(), control_mean.compute()
-
-
-
-
+    return ds_mean.compute(), control_mean.compute()\
 
 def dask_percentile(array: np.ndarray, axis: str, q: float):
     '''
@@ -185,8 +186,7 @@ def parallel_calculate_multi_window_signal_to_noise(da: xr.DataArray,
 
 def calculate_multi_window_signal_to_noise(da: xr.DataArray, lowess_filter:bool=True, windows: Optional[Tuple[int]] = None,
                     start_window = 21, end_window: Optional[int] = None, step_window: Optional[int] = None, 
-                                           parallel=False,
-                    lowess_da:xr.DataArray=None, logginglevel='ERROR'):
+                    parallel=False, lowess_da:xr.DataArray=None, logginglevel='ERROR'):
     
     '''
     Calcualtes the signal to noise for a range of different window lengths, either in parallel
@@ -276,8 +276,8 @@ calculate_rolling_signal_to_nosie_and_bounds = calculate_multi_window_rolling_si
 
 def sn_multi_window(
                     experiment_da: xr.DataArray, control_da: xr.DataArray, windows: Optional[Tuple[int]] = None,
-                    start_window = 21, end_window = 61, step_window = 2, parallel=False,
-                    logginglevel='ERROR') -> xr.Dataset:
+                    start_window = 21, end_window = 61, step_window = 2, parallel=False, 
+                    lowess_experiment_da:xr.DataArray=None, logginglevel='ERROR') -> xr.Dataset:
     '''
     Calcutes the signal to noise for a range of different windows. 
     This is perhaps best not to be done with datasets that have latitude and longitude.
@@ -287,7 +287,7 @@ def sn_multi_window(
     sn_multiwindow_ds = calculate_rolling_signal_to_nosie_and_bounds(
                             experiment_da=experiment_da, control_da=control_da, windows=windows,
                             start_window=start_window, end_window=end_window, step_window = step_window,
-                            parallel=parallel, logginglevel=logginglevel)
+                            parallel=parallel, logginglevel=logginglevel, lowess_experiment_da=lowess_experiment_da)
     
     
     unstable_sn_multi_window_da = sn_multiwindow_ds.utils.above_or_below(
@@ -548,8 +548,12 @@ def get_dataarray_stable_year_multi_window(da:xr.DataArray, max_effective_length
     '''
     
     to_concat = []
-
-    for window in da.window.values:
+    
+    windows = da.window.values
+    windows = np.atleast_1d(windows)
+    
+  
+    for window in windows:
         da_window = da.sel(window=window)
         da_stable = da_window.reduce(helper_get_stable_arg, axis=da_window.get_axis_num('time'),
                                      window=window)
@@ -557,6 +561,9 @@ def get_dataarray_stable_year_multi_window(da:xr.DataArray, max_effective_length
     
     concat_da = xr.concat(to_concat, dim='window')
     concat_da.name = 'time'
+    
+    if max_effective_length is None:
+        max_effective_length = len(da.time.values)
     
     print(f'Replacing points greater than {max_effective_length} with {max_effective_length+1}')
     concat_da = xr.where(

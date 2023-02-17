@@ -5,6 +5,7 @@ PHD_ROOT_DIR = '/g/data/w40/ab2313/PhD'
 
 LONGRUNMIP_DIR = PHD_ROOT_DIR + '/longrunmip'
 ZECMIP_LOCAL_DIR = os.path.join(PHD_ROOT_DIR, 'zecmip')
+ZECMIP_LOCAL_REGRIDDED_DIR = os.path.join(ZECMIP_LOCAL_DIR, 'regridded')
 LONGRUNMIP_MASK_DIR = os.path.join(LONGRUNMIP_DIR, 'landesea_masks')
 
 
@@ -21,7 +22,7 @@ MODULE_DIR = '/home/563/ab2313/Documents/PhD/modules'
 VARIABLE_INFO = variables = {
     'tas': 
     {
-        'longname': 'Near-Surface Air Temperature',
+        'longname': 'Near-Surface\nAir Temperature',
         'units': r'$^{\circ}C$'
     }, 
     'pr':
@@ -93,6 +94,14 @@ EXPERIMENTS_TO_RUN = [
 # This was created using: open_ds.get_models_longer_than_length()
 # 'cesm104' removed as it has too short of a length for all variables but temperature.
 LONGRUNMIP_MODELS = ['ccsm3', 'cnrmcm61', 'hadcm3l', 'ipslcm5a', 'mpiesm11', 'mpiesm12']
+ZECMIP_MODELS = ['CESM2',
+                 #'CanESM5', Model is too short. Lenght ~ 100 years
+                 'GFDL-ESM4',
+                 'GISS-E2-1-G-CC',
+                 'MIROC-ES2L',
+                 'MPI-ESM1-2-LR',
+                 # 'NorESM2-LM',Model is too short. Lenght ~ 100 years
+                 'UKESM1-0-LL']
 
 MULTI_WINDOW_RUN_PARAMS = dict(start_window = 10, end_window = 152, step_window=1)
 
@@ -103,3 +112,9 @@ WINDOWS_OF_INTEREST = [20, 80, 150]#[20, 150, 300]
 LONGRUNMIP_LENGTH = 800 # The length of the longrunmip simulations to use
 # Need to make sure all the windows have a full length
 LONGRUNMIP_EFFECTIVE_LENGTH = LONGRUNMIP_LENGTH - WINDOWS_OF_INTEREST[-1]
+
+
+
+###### KWARGS
+
+save_kwargs = dict(dpi=500, bbox_inches='tight')

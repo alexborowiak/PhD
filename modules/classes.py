@@ -27,3 +27,5 @@ class LocationsLatLon(Enum):
     KINSHASA = (4.4, 15.2)
     ARCTIC = (76, 100)
     JAKARTA = (-6.2088, 106.84)
+    CENTRAL_PACIFIC = (0, -140)
+    SOUTHERN_OCEAN = (-45, 60)

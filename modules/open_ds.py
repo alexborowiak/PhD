@@ -24,7 +24,7 @@ def get_models_longer_than_length(experiment_length: int = 700, control_length: 
     from utils import pprint_list
     
     # A list of all the models and how long the runs for 'tas' go for.
-    with open('data/longrunmip_model_lengths.json') as f:
+    with open('/home/563/ab2313/Documents/PhD/data/longrunmip_model_lengths.json') as f:
         longrunmip_model_lengths = json.loads(f.read())
         
         # Gtting only the models where the controla dn 4xCO2 are longer than requested_length
@@ -50,10 +50,7 @@ def get_file_names_from_from_directory(ROOT_DIR, experiment: ExperimentTypes,
     '''Gets all file names for a model from a particular diretory'''
     
     utils.change_logging_level(logginglevel)
-    
-#     if 'signal_to_noise' in experiment.value:
-#         ROOT_DIR = os.path.join(ROOT_DIR, experiment.value)
-        
+
     logger.info(f'Getting files from {ROOT_DIR}')
     files_in_directory = os.listdir(ROOT_DIR)
     logger.debug(utils.pprint_list_string(files_in_directory))
@@ -76,10 +73,7 @@ def get_file_names_from_from_directory(ROOT_DIR, experiment: ExperimentTypes,
         else:
             logger.error(f'{model=} - {found_fname=} - No file found')
             
-#     if 'signal_to_noise' in experiment.value:
-#         paths_to_return =[os.path.join(experiment.value, fname) for fname in paths_to_return]
-
-        
+      
     return paths_to_return
 
 
@@ -96,12 +90,8 @@ def open_dataset(fpath: str) -> xr.Dataset:
         return ds.squeeze()
     except ValueError as e:
         print(f'{os.path.basename(fpath)} has failed with ValueError')
-        
-#     except:
-#         # Certain files have an object (string) as the datetime - they will error with cftime.
-#         ds = open_function(fpath)
-        
-#     return ds
+    
+    return ds
 
 
 def convert_units(ds: xr.Dataset, variable: str, logginglevel='ERROR'):
@@ -132,12 +122,10 @@ def convert_units(ds: xr.Dataset, variable: str, logginglevel='ERROR'):
     
     
 
-
 def get_requested_length(fname: str):
     if 'control' in fname:
         return 100
     return 800
-
 
 
 def get_mask_for_model(model: str) -> xr.Dataset:
@@ -282,28 +270,40 @@ def read_and_merge_netcdfs(fnames: List[str], ROOT_DIR: str = '', var:str=None,
        
     return merged_ds
 
-def get_mean_for_experiment(ROOT_DIR, experiment_params, models_to_get, max_length:int=None):
+
+def open_experiment_files(experiment_params: dict, experiment: ExperimentTypes, models_to_get:List[str]=None,
+                          max_length:int=None, logginglevel='INFO'):
+    
+    '''
+    Gets all the models for an experiment type.
+    Use this in conjunction with constants.EXPERIMENTS_TO_RUN. These are the different experiment params that 
+    get used.
+    '''
+    
+    utils.change_logging_level(logginglevel)
+
+    if not models_to_get: models_to_get = get_models_longer_than_length()
+    logger.debug(f'{models_to_get}=')
+        
+    ROOT_DIR = os.path.join(constants.LONGRUNMIP_DIR, experiment_params["variable"], 'regrid_retimestamped')
+    logger.debug(f'{ROOT_DIR}=')
+    
+    files_to_open = get_file_names_from_from_directory(ROOT_DIR, experiment, models_to_get)
+    logger.debug(f'{files_to_open}=')
+
+    ds = read_and_merge_netcdfs(files_to_open, ROOT_DIR, mask=experiment_params['mask'], max_length=max_length)
+    
+    return ds
+
+
+    
+
+def get_mean_for_experiment(ROOT_DIR:str, experiment_params:Dict[str, Union[str, float]], models_to_get:List[str],
+                            max_length:int=None):
     '''Gets the global mean/value of experiment and picontrol. '''
-
-    # Directory to get files from
-    VARIABLE_DIR = os.path.join(ROOT_DIR, experiment_params["variable"], 'regrid_retimestamped')
     
-    # Files to open
-    files_to_open_experiment = get_file_names_from_from_directory(VARIABLE_DIR,
-                                                               ExperimentTypes.ABRUPT4X,
-                                                               models_to_get)
-
-    files_to_open_control = get_file_names_from_from_directory(VARIABLE_DIR,
-                                                               ExperimentTypes.CONTROL,
-                                                               models_to_get)
-    
-    # Opening files
-
-    control_ds = read_and_merge_netcdfs(files_to_open_control, VARIABLE_DIR, 
-                                                mask=experiment_params['mask'], max_length = max_length)
-
-    abrupt4x_ds = read_and_merge_netcdfs(files_to_open_experiment, VARIABLE_DIR,
-                                                 mask=experiment_params['mask'], max_length = max_length)
+    control_ds = open_experiment_files(experiment_params, ExperimentTypes.CONTROL, models_to_get=models_to_get)
+    abrupt4x_ds = open_experiment_files(experiment_params, ExperimentTypes.ABRUPT4X, models_to_get=models_to_get)
 
     # Getting the glboal value (mean for all other variables other than sic)
     abrupt4x_mean,control_ds_mean = signal_to_noise.calculate_global_value(

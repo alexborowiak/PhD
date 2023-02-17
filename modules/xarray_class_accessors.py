@@ -63,7 +63,6 @@ class CorrectData:
 
 @xr.register_dataarray_accessor('clima')
 class ClimatologyFunction:
-    
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
         
@@ -100,7 +99,7 @@ class ClimatologyFunction:
     
     
     
-    def anomalies(self, historical: xr.DataArray=None,
+    def anomalies(self, historical=None,
                   start:int = None, end:int = None,logginglevel='ERROR'):
         utils.change_logging_level(logginglevel)
                     
@@ -160,13 +159,11 @@ class ClimatologyFunction:
 
 @xr.register_dataarray_accessor('sn')
 class SignalToNoise:
-    
-    
     def __init__(self, xarray_obj):
         self._obj = xarray_obj
         
     @staticmethod    
-    def loess_filter(y: np.array,logginglevel='ERROR'):
+    def loess_filter(y: np.array, window=10,logginglevel='ERROR'):
         '''
         Applies the loess filter to a 1D numpy array.
 
@@ -202,7 +199,7 @@ class SignalToNoise:
             
         #### !!!! HARD OVERRIDE WINDOW: Window is too long and casuing incorrect filtering
         # Start abrupt not removed properly. Not removing window param as may cause errors
-        window = 10 # This is a good value that will detrend properly. See longrumip_01
+        #window = 10 # This is a good value that will detrend properly. See longrumip_01
         # The fraction to consider the linear trend of each time.
         frac = window/len(y)
 
@@ -211,7 +208,7 @@ class SignalToNoise:
 
         return yhat[:,1]
 
-    def apply_loess_filter(self, min_periods = 0) -> xr.DataArray:
+    def apply_loess_filter(self, window=10, min_periods = 0) -> xr.DataArray:
         
         '''Applies the loess filter static method to an array through time'''
                                              
@@ -221,8 +218,8 @@ class SignalToNoise:
 #         data = data.dropna(dim='time')
            
         # Loess filter
-        loess = np.apply_along_axis(self.loess_filter, data.get_axis_num('time'), data.values)
-         #                           window = window)
+        loess = np.apply_along_axis(self.loess_filter, data.get_axis_num('time'), data.values,
+                                   window = window)
 
         # Detredning with the loess filer.
         loess_detrend = data - loess
@@ -274,8 +271,12 @@ class SignalToNoise:
         >>>    .reduce(apply_along_helper, grid_noise_detrend)
         '''
 
+        # If axis is 1D then might become int. Otherwise is array.
+        # TODO: Should this be 0 axis though???
+        axis = axis if isinstance(axis, int) else axis[0]
+
         # func1ds, axis, arr 
-        return np.apply_along_axis(func1d, axis[0], arr)
+        return np.apply_along_axis(func1d, axis, arr)
     
     
     def adjust_time_from_rolling(self, window, logginglevel='ERROR'):
@@ -311,7 +312,7 @@ class SignalToNoise:
         if ~min_periods:
             min_periods = window
 
-
+        logger.debug(f'{window=}, {min_periods=}\ndata=\n{data}')
         # Rolling gradient * window
         signal_da = data.rolling(time = window, min_periods = min_periods, center = True)\
             .reduce(self._apply_along_helper, func1d = self.trend_line) * window
