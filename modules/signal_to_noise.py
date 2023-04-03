@@ -11,21 +11,24 @@ this package module should perhaps be renamed.
 import numpy as np
 import pandas as pd
 import itertools
+import inspect
 import xarray as xr
-from typing import Optional, Union, Dict, Tuple
 import xarray_extender as xe
 import os, sys
-from dask.diagnostics import ProgressBar
-# Custom xarray classes that addes different method.
+sys.path.append('../')
+from functools import partial
+from multiprocessing import Pool
+
 import xarray_class_accessors as xca
 import utils
-from typing import List
+from typing import Optional, Union, Dict, Tuple, List, Callable
+from numpy.typing import ArrayLike
+from sn_typing import AnyXarray
 
-# import statsmodels.api as sm 
-# lowess = sm.nonparametric.lowess
-
+import classes
+import stats
+from constants import LONGRUNMIP_CHUNKS
 logger = utils.get_notebook_logger()
-
 
 
 def calculate_ice_earth_fraction(ds: xr.Dataset) -> xr.Dataset:
@@ -34,7 +37,8 @@ def calculate_ice_earth_fraction(ds: xr.Dataset) -> xr.Dataset:
     global_frac_ds = ds.sum(dim=['lat', 'lon'])/ocean_as_1_ds.sum(dim=['lat', 'lon'])
     return global_frac_ds
 
-def calculate_global_value(ds: xr.Dataset, control_ds: xr.Dataset, variable:str, lat_bounds:tuple=None,
+
+def calculate_global_value(ds: xr.DataArray, control_ds: xr.DataArray, variable:str, lat_bounds:tuple=None,
                           experiment_params=None):
     '''Calculates anomalies and mean.'''
 
@@ -52,10 +56,10 @@ def calculate_global_value(ds: xr.Dataset, control_ds: xr.Dataset, variable:str,
 
     else:
         # Space mean and anomalmies
-        ds_anom = ds.clima_ds.anomalies(historical_ds=control_ds)
+        ds_anom = ds.clima.anomalies(historical=control_ds)
         
-        control_mean = control_ds.clima_ds.space_mean()
-        ds_mean = ds_anom.clima_ds.space_mean() 
+        control_mean = control_ds.clima.space_mean()
+        ds_mean = ds_anom.clima.space_mean() 
     
     return ds_mean.compute(), control_mean.compute()\
 
@@ -76,7 +80,7 @@ def dask_percentile(array: np.ndarray, axis: str, q: float):
     -------
     xr.Dataset.data.reduce(xca.dask_percentile,dim='time', q=90)
     '''
-#     array = array.rechunk({axis: -1})
+    array = array.rechunk({axis: -1})
     return array.map_blocks(
         np.percentile,
         axis=axis,
@@ -85,154 +89,279 @@ def dask_percentile(array: np.ndarray, axis: str, q: float):
         drop_axis=axis)
 
 
-def add_lower_upper_to_dataset(da: xr.DataArray, lower: xr.DataArray, upper:xr.DataArray) -> xr.Dataset:
-    '''Convert the dataarray to dataset, then ddd the lower and upper bounds
-    as a variable.'''
-    ds = da.to_dataset(name='signal_to_noise')
+
+def calculate_upper_and_lower_bounds(ds:AnyXarray, var:str='signal_to_noise', lower_bound:float=1, upper_bound:float=99, 
+                                    logginglevel='ERROR') -> Tuple[xr.DataArray]:
     
-    ds['lower_bound'] = lower
-    ds['upper_bound'] = upper
+    '''
+    Caculates the lower and upper bounds using percentiles: Returns [lower_bound, upper_bound]
     
-    return ds
-
-
-
-def calculate_upper_and_lower_bounds(ds: xr.Dataset, lower_bound:float = 1, upper_bound: float = 99, 
-                                    logginglevel='ERROR'):
+    Variables
+    ---------
+    
+    ds: AnyXarray
+        Can be xarray dataset or dataarray. If datset need to specify the variable that the 90th percentile
+        is calculated along. This is by default 'signal_to_noise'
+    var: str = 'signal_to_noise'
+        The variable to calculate this along
+  
+    Returns
+    -------
+    (control__lbound, control__ubound): Tuple[xr.DataArray]
+        The lower and upper bound for ds for the variable 'var' along the time axis.
+    
+    '''
     
     utils.change_logging_level(logginglevel)
     logger.info(f'Calculating Upper and lower control bounds')
-   
-    try:
-        control__ubound = ds.reduce(xe.dask_percentile,dim='time', q=upper_bound)
-        control__lbound = ds.reduce(xe.dask_percentile,dim='time', q=lower_bound) 
-        logger.info('Map blocks used')
     
-    except AttributeError as e:
-        control__ubound = ds.reduce(np.nanpercentile,dim='time', q=upper_bound)
-        control__lbound = ds.reduce(np.nanpercentile,dim='time', q=lower_bound)
+    if isinstance(ds, xr.Dataset):
+        if len(list(ds)) >= 2:
+            ds = ds[var] # Potential for other variables to be in there.
+       
+    if ds.chunks:
+        logger.info('Map blocks used')
+        control__ubound = ds.reduce(xe.dask_percentile, dim='time', q=upper_bound)
+        control__lbound = ds.reduce(xe.dask_percentile, dim='time', q=lower_bound) 
+    
+    else:
         logger.info('np.nanpercentile used')
+        control__ubound = ds.reduce(np.nanpercentile, dim='time', q=upper_bound)
+        control__lbound = ds.reduce(np.nanpercentile, dim='time', q=lower_bound)
         
     logger.debug(f'{control__lbound.values}  - {control__ubound.values}')
     return (control__lbound, control__ubound)
 
 
-
-def calculate_rolling_signal_to_noise(window: int, da: xr.DataArray, lowess_filter:bool=True, 
-                                      lowess_da:xr.DataArray=None,
-                                     logginglevel='ERROR') -> xr.DataArray:
-    '''
-    Window first for multiprocessing reasons.
-    Calculates the rolling signal to nosie with an optional lowess filter.
-    '''
-    utils.change_logging_level(logginglevel)
-    print(f'{window}, ', end='')
-    signal_da = da.sn.calculate_rolling_signal(window=window, logginglevel=logginglevel)
-    
-    
-    if lowess_da is not None: # If lowess_da provided
-        da_for_noise = lowess_da
-    elif lowess_filter and lowess_da is None: # Calculate lowess here
-        logger.info('Appyling lowess filter')
-        da_for_noise = da.sn.apply_loess_filter()
-    else: # Don't calculate lowess
-        da_for_noise = da
-        
-    noise_da = da_for_noise.sn.calculate_rolling_noise(window=window, logginglevel=logginglevel)
-    
-    logger.info('Calculating signal to noise')
-    sn_da = signal_da/noise_da
-    
-    sn_da.name = 'signal_to_noise'
-    
-    return sn_da
-
-
-
-def synchronous_calculate_multi_window_signal_to_noise(da: xr.DataArray,
-                    windows: tuple, lowess_filter:bool=True, lowess_da:xr.DataArray=None,
-                                                       logginglevel='ERROR'):
-    
-    '''Synchronously calculates signal to noise'''
-    to_concat = []
-    
-    for window in windows:            
-        sn_da = calculate_rolling_signal_to_noise(da = da, window=window,
-                                                  lowess_filter=lowess_filter,
-                                                  lowess_da = lowess_da,
-                                                  logginglevel=logginglevel)
-        to_concat.append(sn_da)
-        
-    return to_concat
-
-
-def parallel_calculate_multi_window_signal_to_noise(da: xr.DataArray,
-                    windows: tuple, lowess_filter:bool=True, lowess_da: xr.DataArray = None,
-                                                    logginglevel='ERROR'):
-    
-    from functools import partial
-    from multiprocessing import Pool
-    
-    partial_calculate_rolling_signal_to_noise = partial(calculate_rolling_signal_to_noise,
-                                                        da=da, lowess_da = lowess_da,
-                                                        lowess_filter=lowess_filter,
-                                                        logginglevel=logginglevel)
-    with Pool() as pool:
-        to_concat = pool.map(partial_calculate_rolling_signal_to_noise, windows)
-        
-    return to_concat
-
-
-
-def calculate_multi_window_signal_to_noise(da: xr.DataArray, lowess_filter:bool=True, windows: Optional[Tuple[int]] = None,
-                    start_window = 21, end_window: Optional[int] = None, step_window: Optional[int] = None, 
-                    parallel=False, lowess_da:xr.DataArray=None, logginglevel='ERROR'):
-    
-    '''
-    Calcualtes the signal to noise for a range of different window lengths, either in parallel
-    or synchronously.
-    This can work with a single window, just leave end_window and step_window as None.
-    
-    NEW: Windows can be entered as a list of tuples, and this will be used instead of the range
-    # e.g. (20, 150, 30)
-
-    '''
-    
-    # Make sure da is computed before starting
-    da = da.compute()
-    
+def generate_windows(windows:Tuple[int]=None, start_window:int=None, end_window:int=None, step_window:int=None):   
     if windows:
-        window = windows
+        windows = windows
     else:
         if end_window is None: # Only want one window
             windows = [start_window]
         else: # Range of windows
             windows = range(start_window, end_window, step_window)
-    print(windows)
-    
-    if not parallel:
-        to_concat = synchronous_calculate_multi_window_signal_to_noise(da=da, lowess_filter=lowess_filter,
-                                                            windows=windows, lowess_da=lowess_da,
-                                                                       logginglevel=logginglevel)
-    else:
-        to_concat = parallel_calculate_multi_window_signal_to_noise(da=da, lowess_filter=lowess_filter,
-                                                            windows=windows,lowess_da=lowess_da,
-                                                                    logginglevel=logginglevel)
+            
+    return windows
 
-    
+
+
+def __check_concat(to_concat):
+    '''
+    Checks if ano obejct should be concatentated or not.S
+    '''
     if len(to_concat) > 1: # We have ran more than one window
-        da_multi_window = xr.concat(to_concat, dim='window')
-        da_multi_window = da_multi_window.sortby('window')
-        return da_multi_window 
-    return to_concat[0] # Onlt run with one window
+        print('\nConcatenating objects - PLEASE be patient!')
+        return xr.concat(to_concat, dim='window').sortby('window')
+    return  to_concat[0] # Only run with one window
 
 
-def calculate_multi_window_rolling_signal_to_nosie_and_bounds(
-                    experiment_da: xr.DataArray, control_da: xr.DataArray, windows: Optional[Tuple[int]] = None,
-                    start_window = 21, end_window: Optional[int] = None, step_window: Optional[int] = None,
-                    parallel=False, lowess_experiment_da:xr.DataArray=None, name:str='variable', logginglevel='ERROR',
-                    return_all:bool = False) ->    xr.Dataset:
+def time_slice_da(da, time_slice):
+    logger.info(f'slicing time with integers {time_slice}')
+    return da.isel(time=slice(*time_slice))
+
+def allocate_data_for_noise_calculation(da:Optional[AnyXarray]=None, da_for_noise:Optional[AnyXarray]=None, 
+                                        detrend_kwargs:Dict=dict(), detrend:bool=True, time_slice:Tuple[int]=None,
+                                        logginglevel='ERROR') -> Union[xr.DataArray, xr.Dataset]:
     
+    utils.change_logging_level(logginglevel)
+    logger.info('-- allocate_data_for_noise_calculation')
+      
+    if isinstance(da_for_noise, xr.DataArray):
+        logger.info('Dataset for nosie provided')
+        da_for_noise = da_for_noise
+        if time_slice is not None: da_for_noise = time_slice_da(da_for_noise, time_slice)
+    else: # Need to genereate data for noise
+        logger.info('Generating dataset for noise.')
+        if time_slice is not None: da = time_slice_da(da, time_slice) # Time slice before detrend
+        if detrend:
+            logger.info(f'Detrending required. Detrending data using {detrend_kwargs}')
+            da_for_noise = da - stats.trend_fit(da, logginglevel=logginglevel, **detrend_kwargs)
+        elif not detrend: # detrend === false
+            logger.info('Detrending not required - using base data')
+            da_for_noise = da
+            
+        
+    return da_for_noise
+
+
+def noise(da_for_noise:xr.DataArray, rolling_noise:bool=False, window:int=None, logginglevel='ERROR'):
+    
+    utils.change_logging_level(logginglevel)
+    
+    logger.info(f'{rolling_noise=}')
+    if rolling_noise:
+        noise_da = da_for_noise.sn.calculate_rolling_noise(window=window, logginglevel=logginglevel)
+    if not rolling_noise:
+        noise_da = da_for_noise.std(dim='time')
+        noise_da.name = 'noise'
+        
+    return noise_da
+
+
+def signal_to_noise(window:int, da:xr.DataArray, da_for_noise:Optional[xr.DataArray]=None, rolling_noise:bool=True,
+                    logginglevel='ERROR', detrend:bool=True, detrend_kwargs:Dict=dict(), time_slice:Tuple[int]=None,
+                    return_all=False) -> xr.DataArray:
+    '''
+    Window first for multiprocessing reasons.
+    Calculates the rolling signal to nosie with an optional detrend
+    
+    ! This function cannot use decorators - the function gets called with partial which will error
+    '''
+    
+    utils.change_logging_level(logginglevel)
+    if logginglevel == 'ERROR': print(f'{window}, ', end='')
+    
+    # Signal is always rolling and always the data provided - no static, no detrend etc.
+    signal_da = da.sn.rolling_signal(window=window)
+    
+    da_for_noise = allocate_data_for_noise_calculation(
+        da=da, da_for_noise=da_for_noise, detrend_kwargs=detrend_kwargs, detrend=detrend, time_slice=time_slice,
+        logginglevel=logginglevel)
+    
+    
+    noise_da = noise(da_for_noise=da_for_noise, window=window, rolling_noise=rolling_noise, logginglevel=logginglevel)
+    logger.info('Calculating signal to noise')
+    
+    sn_da = signal_da/noise_da
+    sn_da.name = 'signal_to_noise'
+    if return_all:
+        da_for_noise.name = 'da_for_noise'
+        return xr.merge([signal_da, da_for_noise, noise_da, sn_da])
+    return sn_da
+
+
+def __calculate_multi_window_signal_to_noise(windows:Tuple[int], parallel:bool=False, *args, **kwargs)->List[xr.DataArray]:
+    
+    to_concat = []
+    logger.info(f'{__calculate_multi_window_signal_to_noise.__name__} - {windows=}')
+    for window in windows:
+        logger.debug(f'{window=}')
+        ds_sn = signal_to_noise(*args, window=window, **kwargs)
+
+        to_concat.append(ds_sn)
+            
+#     if parallel:
+#         partial_calculate_rolling_signal_to_noise = partial(signal_to_noise, *args, **kwargs)
+#         logger.debug(f'partial function - {partial_calculate_rolling_signal_to_noise.func.__name__} - '
+#                  f'{partial_calculate_rolling_signal_to_noise}')
+#         with Pool() as pool:
+#             to_concat = pool.map(partial_calculate_rolling_signal_to_noise, windows)
+        
+    return to_concat
+
+
+def __parallel_signal(window:int, da:xr.DataArray) ->xr.DataArray:
+    '''To be used when calling a partial function with parallel multiwindow_signal'''
+    print(f'{window}, ', end='')
+    return da.sn.rolling_signal(window=window)
+    
+def multiwindow_signal(da:xr.DataArray, windows:Tuple[int], parallel:bool=False, logginglevel='ERROR')->List[xr.DataArray]:
+    '''
+    Calculate the signal over multiple window lenghts.
+    This is particulary useful when the noise is static: standard deviation of all
+    data
+    
+    '''   
+#     if not parallel:
+    to_concat = []
+    for window in windows:
+        print(f'{window}, ', end='')
+        to_concat.append(da.sn.rolling_signal(window=window, logginglevel=logginglevel))
+#     if parallel:
+#         with Pool() as pool:
+#             signal_func = partial(__parallel_signal, da=da)
+#             to_concat = pool.map(signal_func, windows)
+        
+    return to_concat
+
+
+def __rolling_multiwindow_signal_to_noise(*args, **kwargs):
+    to_concat = __calculate_multi_window_signal_to_noise(*args, **kwargs)
+    
+    sn_da = __check_concat(to_concat)
+    
+    return sn_da
+
+
+def __static_multiwindow_signal_to_noise(da:xr.DataArray, da_for_noise:xr.DataArray, windows:Tuple[int], parallel:bool=False,
+                                         return_all:bool=False, logginglevel='ERROR'):
+    
+    to_concat = multiwindow_signal(da=da, windows=windows, parallel=parallel, logginglevel=logginglevel)
+    
+    sig_da_multi_window = __check_concat(to_concat)
+    
+    noise_da = noise(da_for_noise=da_for_noise, rolling_noise=False, logginglevel=logginglevel)
+     
+    sn_da = sig_da_multi_window/noise_da
+    
+    if isinstance(sn_da, xr.DataArray):
+        sn_da.name = 'signal_to_noise'
+    
+    if return_all:
+        return xr.merge([sn_da, sig_da_multi_window, noise_da])
+    return sn_da
+
+def multiwindow_signal_to_noise(
+    da:xr.DataArray, rolling_noise=True, da_for_noise:Optional[xr.DataArray]=None,
+    detrend:bool=True, detrend_kwargs:Optional[Dict]=dict(), time_slice:Tuple[int]=None,
+    windows:Optional[Tuple[int]]=None, start_window:int=21, end_window:Optional[int]=None, step_window:Optional[int]=None,
+    parallel=False, return_all=False, logginglevel='ERROR'):
+    '''
+    Function that calculates the signal to nosie for multiple different windows. This function is fitted
+    with a plethora of different options.
+    da: xr.DataArray
+        The data to be calculating the signal-to-noise for.
+    rolling_noise: bool=True
+        Wether the noise calculate will be rolling (a timeseires)(True) or will be a single value (False) 
+    windows: Tuple[int]
+        The windows to calculate the signal to noise over
+    start_window, end_window, step_window: int
+        Designed ot be used together to generate a tuple for windows 
+    detrend: bool=True
+        This specifies if the data should be detrended or not. Shoudl be used in conjunction with detrned_kwargs
+    detrend_kwargs: dict
+        A dictionary of the way in which the dataset should be detrended.
+        {'method':'polynomial', 'order': order}
+        {'method': 'lowess', 'lowess_window':50}
+    detrended_da: xr.DataArray
+        Some filter methods (especially lowess) can be slow. It is quicker just to pass a version of da
+        that has already been detrended.  
+    parallel: bool = False
+        Can run the multiple windows in parallel. Currently this feature is broken.
+    ''' 
+    utils.change_logging_level(logginglevel)
+
+    windows = generate_windows(windows=windows, start_window=start_window,
+                               end_window=end_window, step_window=step_window)
+    
+    logger.info(f'{windows=}')
+ 
+    # The data will be detrended the same every time - no need to do it for every single window
+    da_for_noise = allocate_data_for_noise_calculation(
+        da=da, da_for_noise=da_for_noise, time_slice=time_slice,
+        detrend_kwargs=detrend_kwargs, detrend=detrend, logginglevel=logginglevel)
+    logger.debug(f'da_for_noise =\n{da_for_noise}')
+    
+    if rolling_noise: # Need to generate new noise each time
+        sn_da = __rolling_multiwindow_signal_to_noise(
+            da=da, da_for_noise=da_for_noise, windows=windows, parallel=parallel,
+            rolling_noise=True, return_all=return_all, logginglevel=logginglevel)
+    
+    elif not rolling_noise: # Only need to calculate the noise once - same for all datasets (no window)
+        sn_da = __static_multiwindow_signal_to_noise(
+            da=da, da_for_noise=da_for_noise, windows=windows, parallel=parallel,
+            return_all=return_all, logginglevel=logginglevel)
+    
+    return sn_da
+                          
+                                                           
+def multiwindow_signal_to_nosie_and_bounds(
+    experiment_da: xr.DataArray, control_da: xr.DataArray, da_for_noise:Optional[xr.DataArray]=None,
+    rolling_noise=True, time_slice:Tuple[int]=None,
+    windows:Optional[Tuple[int]]=None, start_window:int=21, end_window:Optional[int]=None, step_window:Optional[int]=None,
+    detrend:bool=True, detrend_kwargs:Optional[Dict]=dict(),
+    parallel=False, logginglevel='INFO', return_all=False, return_control:bool=False) -> xr.Dataset:
     '''
     Calculates the siganl to nosie for experiment_da and control_da. The signal to noise for
     control_da is then usef ot calculate lbound, and uboud. These bounds are then added to sn_ds, 
@@ -243,152 +372,69 @@ def calculate_multi_window_rolling_signal_to_nosie_and_bounds(
     e.g. (20, 150, 30)
     
     This can work with a single window, just leave end_window and step_window as None.
-    ----------
-    lowess_exp_da: xr.Dataset
-        If you have pre-filter lowess data, then this can be used. However, this should only
-        be used for the experiment and NOT the control.
-    '''
-    
-    # This is to be slotted into sn_multi_window
-    print('\nExperiment\n--------\n')
-    experiment_da_sn = calculate_multi_window_signal_to_noise(da=experiment_da, lowess_filter=True, windows=windows,
-                            start_window=start_window, end_window=end_window, step_window = step_window,
-                                                              lowess_da=lowess_experiment_da, parallel=parallel,
-                                                              logginglevel=logginglevel)
-    print('\nControl\n------\n')
-    control_sn = calculate_multi_window_signal_to_noise(da=control_da, lowess_filter=False, windows=windows,
-                            start_window=start_window, end_window=end_window, step_window = step_window,
-                                                              parallel=parallel, logginglevel=logginglevel)
-    
-    lower_bound, upper_bound = calculate_upper_and_lower_bounds(control_sn)    
 
-    sn_multiwindow_ds = xr.merge([experiment_da_sn.to_dataset(), 
-                  lower_bound.to_dataset(name='lower_bound'), 
-                  upper_bound.to_dataset(name='upper_bound')], 
-                compat='override')
-    if return_all:
+    '''
+    utils.change_logging_level(logginglevel)
+    # This is to be slotted into sn_multi_window
+    sn_kwargs = dict(windows=windows, start_window=start_window, end_window=end_window, step_window=step_window,
+                     rolling_noise=rolling_noise, parallel=parallel, time_slice=time_slice, logginglevel=logginglevel,
+                    return_all=return_all)
+    logger.info(f'{sn_kwargs=}')
+    
+    print('\nExperiment\n--------\n', end='')
+    experiment_da_sn = multiwindow_signal_to_noise(
+        da=experiment_da, da_for_noise=da_for_noise, detrend=detrend, detrend_kwargs=detrend_kwargs, **sn_kwargs)
+    
+    print(' - Finished')
+    print('\nControl\n------\n')
+    # if da_for_noise = control_da then the raw control da will be used.
+    control_sn = multiwindow_signal_to_noise(da=control_da, da_for_noise=control_da, detrend=False, **sn_kwargs)
+
+    
+    print('Persist')
+    if control_sn.chunks:
+        chunks = LONGRUNMIP_CHUNKS if ('lat' in list(control_sn.coords) and 'lon' in list(control_sn.coords)) else {'time':-1}
+        control_sn = control_sn.chunk(chunks).persist()
+    if experiment_da_sn.chunks: experiment_da_sn = experiment_da_sn.persist()
+    print('Calculating bounds')
+    lower_bound, upper_bound = calculate_upper_and_lower_bounds(control_sn, logginglevel=logginglevel)  
+    
+    if isinstance(experiment_da_sn, xr.DataArray): experiment_da_sn.to_dataset(name='signal_to_noise')
+    
+    print('final merge')
+    sn_multiwindow_ds = xr.merge(
+        [experiment_da_sn,
+         lower_bound.to_dataset(name='lower_bound'),
+         upper_bound.to_dataset(name='upper_bound')], 
+        compat='override')
+    
+    if return_control:
         return sn_multiwindow_ds, control_sn
     
     return sn_multiwindow_ds.squeeze()
 
 
-calculate_rolling_signal_to_nosie_and_bounds = calculate_multi_window_rolling_signal_to_nosie_and_bounds
 
-def sn_multi_window(
-                    experiment_da: xr.DataArray, control_da: xr.DataArray, windows: Optional[Tuple[int]] = None,
-                    start_window = 21, end_window = 61, step_window = 2, parallel=False, 
-                    lowess_experiment_da:xr.DataArray=None, logginglevel='ERROR') -> xr.Dataset:
+def stability_levels(ds:xr.Dataset) -> xr.DataArray:
     '''
-    Calcutes the signal to noise for a range of different windows. 
-    This is perhaps best not to be done with datasets that have latitude and longitude.
+    Dataset needs to have the data_vars: 'signal_to_noise', 'upper_bound', 'lower_bounds'
+    Divides the datset into inncreasing unstable, decreasing unstable, and stable.
     
-    '''
-    
-    sn_multiwindow_ds = calculate_rolling_signal_to_nosie_and_bounds(
-                            experiment_da=experiment_da, control_da=control_da, windows=windows,
-                            start_window=start_window, end_window=end_window, step_window = step_window,
-                            parallel=parallel, logginglevel=logginglevel, lowess_experiment_da=lowess_experiment_da)
-    
-    
-    unstable_sn_multi_window_da = sn_multiwindow_ds.utils.above_or_below(
-        'signal_to_noise', greater_than_var = 'upper_bound', less_than_var = 'lower_bound').squeeze()
-    
-    stable_sn_multi_window_da = sn_multiwindow_ds.utils.between(
-        'signal_to_noise', less_than_var = 'upper_bound', greater_than_var = 'lower_bound').squeeze()
-    
-    return unstable_sn_multi_window_da , stable_sn_multi_window_da
-    
-
-
-def number_finite(da: xr.DataArray, dim:str='model') -> xr.DataArray:
-    '''
-    Gets the number of points that are finite .
-    The function gets all points that are finite across the dim 'dim'.
-    
-    Paramaters
-    ----------
-    da: xr.Dataset or xr.DataArray (ds will be converted to da). This is the dataset 
-        that the number of finite points across dim.
-    number_present: xr.DataArray - the max number of available observations at each timestep
-    dim: str - the dimension to sum finite points across
-    
-    Returns
-    ------
-    da: xr.DataArray - the fraction of finite points.
+    These can then be counted to view the number of unstable and stable models at
+    any point.
     
     '''
+    decreasing_unstable_da = ds.where(ds.signal_to_noise < ds.lower_bound).signal_to_noise
+    increasing_unstable_da = ds.where(ds.signal_to_noise > ds.upper_bound).signal_to_noise
     
-    # If da is a dataset, we are going to convert to a data array.
-    if isinstance(da, xr.Dataset):
-        da = da.to_array(dim=dim)
     
-    # The points that are finite become1 , else 0
-    finite_da = xr.where(np.isfinite(da), 1, 0)
-    # Summing the number of finite points.
-    number_da = finite_da.sum(dim)
+    stable_da = ds.utils.between('signal_to_noise',
+                                 less_than_var='upper_bound', greater_than_var='lower_bound').signal_to_noise
+    unstable_da = ds.utils.above_or_below(
+        'signal_to_noise', greater_than_var='upper_bound', less_than_var='lower_bound').signal_to_noise
     
-    return number_da
-
-
-def percent_finite(da, number_present: xr.DataArray, dim:str='model') -> xr.DataArray:
-    '''
-    Gets the percent of points that are finite based upon the number of available models.
-    The function gets all points that are finite across the dim 'dim'.
-    
-    Paramaters
-    ----------
-    da: xr.Dataset or xr.DataArray (ds will be converted to da). This is the dataset 
-        that the number of finite points across dim.
-    number_present: xr.DataArray - the max number of available observations at each timestep
-    dim: str - the dimension to sum finite points across
-    
-    Returns
-    ------
-    da: xr.DataArray - the fraction of finite points.
-    
-    '''
-    
-    number_da = number_finite(da, dim)
-    
-    # Converting to a percent of the max number of finite points possible.
-    da = number_da * 100/number_present
-    
-    # Renaming the da with percennt and dim.
-    da.name = f'percent_of_{dim}'
-    
-    return da
-
-
-def count_over_data_vars(ds: xr.Dataset, data_vars: list = None, dim='model') -> xr.DataArray:
-    '''
-    Counts the number of data vars that are present. 
-    
-    Parameters
-    ----------
-    ds (xr.Dataset): the dataset to count over
-    data_vars (list): the data vars that need to be coutned.
-    dim (str): the dimenesion to be counted over
-    
-    Returns
-    -------
-    number_da (xr.Dataarray): the number of occurences accross the data vars
-    
-    '''
-    
-    # If data_vars is none then we want all the data vars from out dataset
-    if data_vars is None:
-        data_vars = ds.data_vars
-    
-    # Subsetting the desired data vars and then counting along a dimenstion. 
-    da = ds[data_vars].to_array(dim=dim) 
-    # This is the nubmer of models peresent at each timestep.
-    number_da = da.count(dim=dim)
-    # In the multi-window function, time has been changed to time.year, so must be done here as well
-    # Note: This may be removed in future.
-    number_da['time'] = ds.time.dt.year
-    number_da.name = f'number_of_{dim}'
-    return number_da
-
+    return xr.concat([decreasing_unstable_da, increasing_unstable_da, unstable_da, stable_da], 
+                     pd.Index(['decreasing', 'increasing', 'unstable', 'stable'], name='stability'))
 
 
 
@@ -433,55 +479,6 @@ def percent_of_non_nan_points_in_period(ds: xr.Dataset, period_list: List[tuple]
     # Merge
     merged_ds = xr.merge([percent_mean_da, percent_ucnertainty_da, percent_ds])
     return merged_ds
-
-
-def pattern_correlation_of_models(da: xr.DataArray, logginglevel='ERROR') -> pd.DataFrame:
-    '''
-    Calculatees the pattern correlation between a model and all the
-    mean of all the other models. 
-    
-    Parameters
-    -----------
-    da: xr.DataArray
-        Must contain the coordinates 'model' and 'period'
-    Returns
-    -------
-    df: pd.DataFrame
-        Pandas dataframe with columns as the period and the rows as the model
-    
-    
-    '''
-    from scipy.stats import spearmanr
-    
-    utils.change_logging_level(logginglevel)
-    
-    models = da.model.values
-    periods = da.period.values
-    
-    # Loop through all models and period
-    pattern_corr_dict = {}
-    for period in periods:
-        logger.info(f'{period=}')
-        period_dict = {}
-        for model in models:
-            logger.info(f'{model=}')
-
-            # Mean of all model but the model in question
-            da_drop_model = da.where(da.model.isin(models[models != model]), drop=True)
-            da_drop_model_period = da_drop_model.sel(period = period)
-            da_mean = da_drop_model_period.mean(dim='model').values.flatten()
-            
-            # The model in question
-            da_single_model = da.sel(model=model, period=period)
-            percent_np = da_single_model.values.flatten()
-
-            pattern_corr = spearmanr(percent_np, da_mean)
-                
-            # Just the correlation
-            period_dict[model] = pattern_corr[0]
-        pattern_corr_dict[period] = period_dict
-    df = pd.DataFrame(pattern_corr_dict)
-    return df
 
 
 
@@ -532,6 +529,27 @@ def helper_get_stable_arg(data: np.ndarray, axis: int, window: int) -> np.ndarra
     return np.apply_along_axis(get_stable_arg, axis, data, window)
 
 
+def get_stable_year(untsable_da: xr.DataArray, window:int, max_effective_length:int=None) -> xr.DataArray:
+    
+    if 'window' in list(untsable_da.coords):
+        window = int(untsable_da.window.values)
+    else:
+        window = window
+    da_stable = untsable_da.reduce(helper_get_stable_arg, axis=untsable_da.get_axis_num('time'),
+                                     window=window)
+    
+
+    
+    if max_effective_length is None:
+        max_effective_length = len(untsable_da.time.values)
+    
+    print(f'Replacing points greater than {max_effective_length} with {max_effective_length+1}')
+    
+    da_stable = xr.where(da_stable > max_effective_length, max_effective_length+1, da_stable)
+    
+    return da_stable
+    
+
 def get_dataarray_stable_year_multi_window(da:xr.DataArray, max_effective_length:int=None) -> xr.DataArray:
     '''
     Loops through all the windows and calculated the first year stable for each window
@@ -581,7 +599,6 @@ def get_dataset_stable_year_multi_window(ds:xr.Dataset, max_effective_length:int
     Applying the get_dataarray_stable_year_multi_window to a dataset and then
     renaming the coord to time
     '''
-    from functools import partial
     
     get_dataarray_stable_year_multi_window_partial = partial(
         get_dataarray_stable_year_multi_window, max_effective_length=max_effective_length)
@@ -590,237 +607,102 @@ def get_dataset_stable_year_multi_window(ds:xr.Dataset, max_effective_length:int
                      .to_array(dim='variable')
                      .to_dataset(name='time'))
 
-
-# def get_multi_window_stable_arg(da: xr.DataArray):
-#     '''
-#     Xarray dataset with window as one of the coordinats and time as another coordinate
-    
-
-#     TODO: Can this be repalced with something along the lines of 
-#     np.apply_along_axis(get_stable_arg, da.get_axis_num('time'), da).shape
-#     '''
-    
-#     # Loop through all windows and get the stable arguement
-#     stable_points = []
-#     for window in da.window.values:
-#         first_stable = get_stable_arg(da.sel(window=window).values, 
-#                                               float(da.sel(window=window).window.values))
-#         stable_points.append(first_stable)
-    
-#     # Convert from arguement to time stampe
-#     # time = da.time.values
-#     # stable_point_time = [time[pt] if np.isfinite(pt) else time[-1] for pt in stable_points]
-    
-#     # Add values to xarray dataset that has no time dim.
-#     da_stable_point = xr.zeros_like(da.isel(time=0)).drop('time')
-#     da_stable_point.values = stable_points#stable_point_time
-
-#     da_stable_point = da_stable_point.to_dataset(name='time')
-    
-#     return da_stable_point
-
-
-# def get_stable_point_all_datavars(ds: xr.Dataset) -> xr.Dataset:
-#     '''
-#     Loops over all data vara and gets the point (timestamp when the mdoe becomes stable)
-    
-#     Parameters
-#     ----------
-#     ds: xr.Dataset
-#         A dataset with data_vars that are to be looped over. 
-    
-#     Returns
-#     -------
-#     stable_point_ds: xr.Dataset
-#         A dataset with a new coordinate model (input ds has models as data_vars).
-    
-#     '''
-    
-#     # TODO: The can be done in parallel.
-#     data_vars = list(ds.data_vars)
-#     to_concat = []
-#     for dvar in data_vars:
-#         da = ds[dvar]
-#         da_stable_point = get_multi_window_stable_arg(da)
-#         da_stable_point = da_stable_point.expand_dims('model').assign_coords(model=('model', [dvar]))
-#         to_concat.append(da_stable_point)
-    
-#     stable_point_ds = xr.concat(to_concat, dim='model')
-#     return stable_point_ds
-
-
-def convert_from_arg_to_time(arg:int, time: list):
-    '''Can be used with xr.apply_ufunc to convert all values of the year when a model for a window stabilises
-    to the date time
-    functools.parital is also needed for this to work
-    convert_from_arg_to_time = partial(convert_from_arg_to_time, time=stable_sn_ds.time.values)
-    
+def get_stable_year_ds(sn_multi_ds):
     '''
-    return time[arg]
+    Gets the year in which the time series first becomes styable
+    '''
 
- 
+    unstable_sn_ds = sn_multi_ds.utils.above_or_below(
+            'signal_to_noise', greater_than_var = 'upper_bound', less_than_var = 'lower_bound')
 
-def get_upper_lim(ds, max_window):
-    '''Based upon the max length of a model, get the upper x-lim'''
-    lengths = []
-    for dvar in (ds.data_vars):
-        da_len = len(ds[dvar].dropna(dim='time').time.values)
-        lengths.append(da_len)
-    max_length = np.min(lengths)
-    
-    max_effective = max_length - max_window
-    return max_effective
+    stable_point_ds = get_dataset_stable_year_multi_window(unstable_sn_ds)
+    return stable_point_ds
 
 
 
 
-# def get_ds_above_below_and_between_bounds(da: xr.DataArray, da_sn: xr.DataArray, 
-#                                           control__lbound: xr.DataArray, control__ubound: xr.DataArray) -> xr.DataArray:
-    
-#     da_stable = da.where(np.logical_and(da_sn <= control__ubound,da_sn >= control__lbound))
-#     da_increasing = da.where(da_sn >= control__ubound )
-#     da_decreasing = da.where(da_sn <= control__lbound )
-    
-#     return (da_stable, da_increasing, da_decreasing)
-# def global_sn(
-#     da: xr.DataArray,  control: xr.DataArray,
-#     da_loess: Optional[xr.DataArray] = None,
-# #     control_loess: Optional[xr.DataArray] = None, # !!!! Control data should not be loess filtered
-#     window = 61, return_all = False, logginglevel='ERROR')-> xr.Dataset:
+# def number_finite(da: xr.DataArray, dim:str='model') -> xr.DataArray:
 #     '''
-#     Calculates the signal to noise for an array da, based upon the control.
     
-#     A full guide on all the functions used here can be found at in 02_gmst_analysis.ipynb
+#     !!!! I don't know why you need this. This is just COUNT.
+#     Gets the number of points that are finite .
+#     The function gets all points that are finite across the dim 'dim'.
+    
+#     Paramaters
+#     ----------
+#     da: xr.Dataset or xr.DataArray (ds will be converted to da). This is the dataset 
+#         that the number of finite points across dim.
+#     number_present: xr.DataArray - the max number of available observations at each timestep
+#     dim: str - the dimension to sum finite points across
+    
+#     Returns
+#     ------
+#     da: xr.DataArray - the fraction of finite points.
+    
+#     '''
+    
+#     # If da is a dataset, we are going to convert to a data array.
+#     if isinstance(da, xr.Dataset):
+#         da = da.to_array(dim=dim)
+    
+#     # The points that are finite become1 , else 0
+#     finite_da = xr.where(np.isfinite(da), 1, 0)
+    
+#     # Summing the number of finite points.
+#     number_da = finite_da.sum(dim)
+    
+    
+#     return number_da
+
+
+# def get_fraction_stable_ds(sn_multi_ds: xr.DataArray, ) -> xr.Dataset:
+#     '''
+#     Gets the number of models that are both stable and unstable at each time point.
+#     Dataset must have dimension model, and must contain variables:
+#     signal_to_noise, upper_bound, lower_bound.
+#     '''
+#     stable_sn_ds = sn_multi_ds.utils.between(
+#         'signal_to_noise', less_than_var = 'upper_bound', greater_than_var = 'lower_bound')
+    
+#     unstable_sn_ds = sn_multi_ds.utils.above_or_below(
+#             'signal_to_noise', greater_than_var = 'upper_bound', less_than_var = 'lower_bound')
+
+    
+#     stable_number_da = number_finite(stable_sn_ds.signal_to_noise)
+#     unstable_number_da = number_finite(unstable_sn_ds.signal_to_noise)
+#     stable_number_da.name = 'stable'
+#     unstable_number_da.name = 'unstable'
+    
+#     return xr.merge([stable_number_da, unstable_number_da])
+
+
+
+# def count_over_data_vars(ds: xr.Dataset, data_vars: list = None, dim='model') -> xr.DataArray:
+#     '''
+#     Counts the number of data vars that are present. 
     
 #     Parameters
 #     ----------
-#     da: xr.DataArray
-#         input array the the signal to noise is in question for 
-#     control: xr.DataArray
-#         the control to compare with
-#     da_loess: Optional[xr.DataArray]
-#         loess filtered da
-#     control_loess: Optional[xr.DataArray]
-#         loess filtered control
-#     window = 61: 
-#         the window length
-#     return_all = False
-#         see below (return either 4 datasets or 9)
-#     logginglevel = 'ERROR'
-    
-    
-#     Note: 
-#     Returns 4 datasets: ds_sn, ds_sn_stable, ds_sn_increasing, ds_sn_decreasing
-    
-    
-#     But can be changed to return 9 datasets with return_all = True: 
-#                 da_stable, da_increasing, da_decreasing, 
-#                 ds_sn, d_sn_stable, ds_sn_increasing, ds_sn_decreasing, 
-#                 control__lbound, control__ubound
-
-#     '''
-    
-#     utils.change_logging_level(logginglevel)
-#     logger.info('Calculating signal to noise')
-    
-#     # !!!!!! You should not be loess filter the control data!!!!!
-#     #if control_loess is None:
-#     #   logger.info(f'- control_loess not provided.')
-#     #    control_loess = control.sn.apply_loess_filter()
-        
-#     control_signal = control.sn.calculate_rolling_signal(window = window, logginglevel=logginglevel)
-#     control_noise = control.sn.calculate_rolling_noise(window = window, logginglevel=logginglevel) #control_loess
-#     control_sn = control_signal/control_noise
-#     control__lbound, control__ubound = calculate_upper_and_lower_bounds(control_sn)
-
-
-#     if da_loess is None:
-#         logger.debug(f'- da_loess not provided')
-#         da_loess = da.sn.apply_loess_filter()
-        
-        
-#     da_signal = da.sn.calculate_rolling_signal(window = window, logginglevel=logginglevel)
-#     da_noise = da_loess.sn.calculate_rolling_noise(window = window, logginglevel=logginglevel)
-#     da_sn = da_signal/da_noise
-
-
-#     da_sn_stable, da_sn_increasing, da_sn_decreasing = \
-#                         get_ds_above_below_and_between_bounds(da_sn, da_sn, control__lbound, control__ubound)
-    
-    
-#     ds_sn = add_lower_upper_to_dataset(da_sn, control__lbound, control__ubound)
-#     ds_sn_stable = add_lower_upper_to_dataset(da_sn_stable, control__lbound, control__ubound)
-#     ds_sn_increasing = add_lower_upper_to_dataset(da_sn_increasing, control__lbound, control__ubound)
-#     ds_sn_decreasing = add_lower_upper_to_dataset(da_sn_decreasing, control__lbound, control__ubound)
-
-    
-#     if return_all:
-        
-#         da_stable, da_increasing, da_decreasing = \
-#                         get_ds_above_below_and_between_bounds(da, da_sn, control__lbound, control__ubound)
-#         return (da_stable, da_increasing, da_decreasing, 
-#                 ds_sn, ds_sn_stable, ds_sn_increasing, ds_sn_decreasing, 
-#                 control__lbound, control__ubound)
-
-#     return ds_sn, ds_sn_stable, ds_sn_increasing, ds_sn_decreasing
-    
-    
-    
-# def sn_multi_window(da, control_da, start_window = 21, end_window = 221, step_window = 8,
-#                   logginglevel='ERROR'):
-#     '''
-#     Calls the global_mean_sn function repeatedly for windows ranging betweent start_window
-#     and end_window with a step size of step_window.
-    
-#     Parameters
-#     ----------
-    
-#     da, control_da, start_window = 21, end_window = 221, step_window = 8
-    
+#     ds (xr.Dataset): the dataset to count over
+#     data_vars (list): the data vars that need to be coutned.
+#     dim (str): the dimenesion to be counted over
     
 #     Returns
 #     -------
-#     unstable_sn_multi_window_da , stable_sn_multi_window_da  Both these data sets contian dimension of time and window.
+#     number_da (xr.Dataarray): the number of occurences accross the data vars
+    
 #     '''
-#     utils.change_logging_level(logginglevel)
     
-#     decreasing_sn_array = []
-#     increasing_sn_array = []
-#     stable_array = []
+#     # If data_vars is none then we want all the data vars from out dataset
+#     if data_vars is None:
+#         data_vars = ds.data_vars
     
-#     windows = range(start_window, end_window,step_window)
-    
-#     print(f'{start_window=}, {end_window=}, {step_window=}')
-#     # Looping through
-#     for window in windows:
-
-#         print(f'{window}, ', end='')
-#         da_sn, da_sn_stable, da_sn_increasing, da_sn_decreasing = global_sn(da, control_da, window = window,
-#                                                                                 logginglevel=logginglevel)
-        
-#         increasing_sn_array.append(da_sn_increasing)
-#         decreasing_sn_array.append(da_sn_decreasing)
-#         stable_array.append(da_sn_stable)
-    
-#     # Mergine the das together to form a an array witht he S/N values and a dim called window
-#     increasing_sn_multi_window_ds = xr.concat(increasing_sn_array, pd.Index(windows, name = 'window'))
-#     decreasing_sn_multi_window_ds = xr.concat(decreasing_sn_array, pd.Index(windows, name = 'window'))
-    
-    
-#     # Loading into memoery. 
-#     increasing_sn_multi_window_ds = increasing_sn_multi_window_ds.compute()
-#     decreasing_sn_multi_window_ds = decreasing_sn_multi_window_ds.compute()
-    
-
-#     unstable_sn_multi_window_da  = increasing_sn_multi_window_ds.fillna(0) + decreasing_sn_multi_window_ds.fillna(0)
-#     unstable_sn_multi_window_da  = xr.where(unstable_sn_multi_window_da  != 0, unstable_sn_multi_window_da , np.nan)
-    
-#     unstable_sn_multi_window_da['time'] = unstable_sn_multi_window_da.time.dt.year.values
-    
-    
-#     stable_sn_multi_window_da  = xr.where(np.isfinite(unstable_sn_multi_window_da ), 1, 0)
-    
-#     return unstable_sn_multi_window_da , stable_sn_multi_window_da 
-
-
-# -
+#     # Subsetting the desired data vars and then counting along a dimenstion. 
+#     da = ds[data_vars].to_array(dim=dim) 
+#     # This is the nubmer of models peresent at each timestep.
+#     number_da = da.count(dim=dim)
+#     # In the multi-window function, time has been changed to time.year, so must be done here as well
+#     # Note: This may be removed in future.
+#     number_da['time'] = ds.time.dt.year
+#     number_da.name = f'number_of_{dim}'
+#     return number_da

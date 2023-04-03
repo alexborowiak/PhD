@@ -14,6 +14,18 @@ import utils
 logger = utils.get_notebook_logger()
 
 
+### ZECMIP
+
+
+def open_mfdataset_nc(path, dropna=True, to_array=True):
+    path = os.path.join(path, '*.nc')
+    ds = xr.open_mfdataset(path)
+    if dropna:
+        da = ds.dropna(dim='time')
+    if to_array:
+        da = da.to_array()
+    return da.squeeze()
+
 
 ### Longrunmip
 
@@ -100,7 +112,7 @@ def convert_units(ds: xr.Dataset, variable: str, logginglevel='ERROR'):
     KELVIN_TO_DEGC = 273.15
     logger.debug(f'{ds}')
     if variable == 'tas':
-        logger.info('Converting from Kelvin to C')
+        logger.debug('Converting from Kelvin to C')
         return ds-KELVIN_TO_DEGC
     if variable == 'pr':
         logger.info('Converting from per second to yearly total')
@@ -109,7 +121,7 @@ def convert_units(ds: xr.Dataset, variable: str, logginglevel='ERROR'):
     
     if variable == 'tos':
         if ds.to_array().min().values > 200:
-            logger.info('Units are in Kelvin. Converting to DegC')
+            logger.debug('Units are in Kelvin. Converting to DegC')
             
             return ds-KELVIN_TO_DEGC
     
@@ -127,7 +139,7 @@ def get_requested_length(fname: str):
         return 100
     return 800
 
-
+@utils.function_details
 def get_mask_for_model(model: str) -> xr.Dataset:
     '''
     Opens the land sea mask for a specific model found in the directory
@@ -144,6 +156,7 @@ def get_mask_for_model(model: str) -> xr.Dataset:
     mask_ds = xr.open_dataset(os.path.join(constants.LONGRUNMIP_MASK_DIR, model_mask_name))
     return mask_ds
 
+@utils.function_details
 def  apply_landsea_mask(ds: xr.Dataset, model:str, mask: Union['land', 'sea'] = None):
     '''
     Applies either a land or sea mask to the dataset. 
@@ -157,23 +170,23 @@ def  apply_landsea_mask(ds: xr.Dataset, model:str, mask: Union['land', 'sea'] = 
     raise ValueError(f'{mask} is not a valid mask option. Please use either [land, sea]')
     
     
-    
+@utils.function_details    
 def remove_start_time_steps(ds, number_to_remove:int):
     '''Removes the start number_to_remove points and adjsuts the time accordingly.'''
-    logger.error(f'Removing first {number_to_remove} steps')
+    logger.debug(f'Removing first {number_to_remove} steps')
     new_time = ds.time.values[:-number_to_remove]
     ds = ds.isel(time=slice(number_to_remove, None))
     ds['time'] = new_time
 
     return ds
 
-
+@utils.function_details
 def read_longrunmip_netcdf(fname: str, ROOT_DIR: str = '',
                            var:str = None, model_index:int = 2, 
                            requested_length:int=None, max_length: int = 1200,
                            chunks = {'lat':72/4,'lon':144/4,'time':-1},
                            mask: Union['land', 'sea'] = None,
-                           logginglevel='ERROR') -> xr.Dataset:
+                           logginglevel='INFO') -> xr.Dataset:
     
     utils.change_logging_level(logginglevel)
     
@@ -182,7 +195,7 @@ def read_longrunmip_netcdf(fname: str, ROOT_DIR: str = '',
     
     if not requested_length:
         requested_length = get_requested_length(fpath)
-        logger.info(f'{requested_length=}')
+        logger.debug(f'{requested_length=}')
 
     model = fname.split('_')[model_index].lower() # Need to open da and alter length and names of vars
     model = os.path.basename(model) # Ocassionally fname can contain parts of a path
@@ -204,7 +217,7 @@ def read_longrunmip_netcdf(fname: str, ROOT_DIR: str = '',
     if var is None:
         var = list(ds.data_vars)[0]
                 
-    logger.info(f'Rename {var=} to {model}')
+    logger.debug(f'Rename {var=} to {model}')
     logger.debug(ds)
 
     ds = ds.rename({var: model})[[model]]
@@ -220,9 +233,9 @@ def read_longrunmip_netcdf(fname: str, ROOT_DIR: str = '',
     return ds
 
     
-
-def read_and_merge_netcdfs(fnames: List[str], ROOT_DIR: str = '', var:str=None,
-                           logginglevel='ERROR',*args, **kwargs) -> xr.Dataset:
+@utils.function_details
+def read_and_merge_netcdfs(fnames: List[str], ROOT_DIR:str='', var:str=None, no_time_extension:bool=True,
+                           logginglevel='INFO',*args, **kwargs) -> xr.Dataset:
     '''
     Opens a list of fnames found in a common directory. Then merges these files
     together.
@@ -251,47 +264,91 @@ def read_and_merge_netcdfs(fnames: List[str], ROOT_DIR: str = '', var:str=None,
     utils.change_logging_level(logginglevel)
     
     logger.info(f'Opening files in {ROOT_DIR}')
+    logger.debug(fnames)
      
     to_merge = []
+    logger.debug('Time lengths')
+    if no_time_extension: time_length_list = []
+        
     for fname in fnames:
         try:
             ds = read_longrunmip_netcdf(fname=fname, ROOT_DIR=ROOT_DIR, var=var, 
                                         logginglevel = logginglevel, *args, **kwargs)
-
+            time_length = len(ds.time.values)
+            logger.debug(f'{fname} - {time_length}')
+            if no_time_extension: time_length_list.append(time_length)
+                
             to_merge.append(ds)
             
         except LongRunMIPError as e:
             logger.error(e)
             
-    if len(to_merge) == 0:
-        raise LongRunMIPError('No files found')
+    if len(to_merge) == 0: raise LongRunMIPError('No files found')
+        
+    if no_time_extension: 
+        max_all_models_pressent = np.min(time_length_list)
+        logger.info(f'Time length with all models present {max_all_models_pressent}')
+        to_merge = [ds.isel(time=slice(None,max_all_models_pressent)) for ds in to_merge]
            
     merged_ds = xr.merge(to_merge, compat='override') 
+    
+    logger.info(f'Length of final dataset {len(merged_ds.time.values)}\n'
+                f'Dataset has coords {list(merged_ds.coords)})\n'
+                f'Dataset has data vars {list(merged_ds.data_vars)}')
        
     return merged_ds
 
 
+
+@utils.function_details
 def open_experiment_files(experiment_params: dict, experiment: ExperimentTypes, models_to_get:List[str]=None,
-                          max_length:int=None, logginglevel='INFO'):
+                          max_length:int=None, no_time_extension:bool=True, 
+                          combine_to_coord:bool=True, new_coord_name:str = 'model',
+                          keep_time_stamp:bool=True, logginglevel='INFO'):
     
     '''
     Gets all the models for an experiment type.
     Use this in conjunction with constants.EXPERIMENTS_TO_RUN. These are the different experiment params that 
     get used.
+    
+    
+    experiment: bool = True
+        This will match the lengths of all the datasets. E.g. the model that has the shorted
+        run will be the final length of the data set. This is needed for the detredning methods
+        that will not work if nans have been inserted onto the end.
+    keep_time_stamp: bool=False
+        For some reason the cftime is now not plotting. Also, having an actual time stamp doesn't matter.
+        Can just use an integer value anyway
+    no_time_extension:bool=True
+        Do not extend the time for any dataset. Clip the dataset to the shortest data set
+    combine_to_coord: bool
+        Combine all data vars into a new coordinate with name 'new_coord_name' (default = 'model')
     '''
+    print('\n')
     
     utils.change_logging_level(logginglevel)
+    logger.info(f'Opening {experiment}')
 
     if not models_to_get: models_to_get = get_models_longer_than_length()
-    logger.debug(f'{models_to_get}=')
+    logger.info(f'{models_to_get}=')
         
     ROOT_DIR = os.path.join(constants.LONGRUNMIP_DIR, experiment_params["variable"], 'regrid_retimestamped')
-    logger.debug(f'{ROOT_DIR}=')
+    logger.info(f'{ROOT_DIR}=')
     
     files_to_open = get_file_names_from_from_directory(ROOT_DIR, experiment, models_to_get)
     logger.debug(f'{files_to_open}=')
 
-    ds = read_and_merge_netcdfs(files_to_open, ROOT_DIR, mask=experiment_params['mask'], max_length=max_length)
+    ds = read_and_merge_netcdfs(files_to_open, ROOT_DIR, mask=experiment_params['mask'], max_length=max_length, 
+                               no_time_extension=no_time_extension)
+    
+    if not keep_time_stamp:
+        logger.debug('Chning time from time stamp to integer value between o and length of dataset')
+        ds['time'] = range(len(ds.time.values)) # Integer value between 0 and length of dataset
+
+    if combine_to_coord:
+        ds = ds.to_array(name=experiment_params['variable']).rename({'variable': new_coord_name})
+#         ds.name = experiment_params['variable']
+        logger.info(f'Converted to datarray with {new_coord_name=} and name')
     
     return ds
 

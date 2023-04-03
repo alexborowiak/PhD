@@ -9,6 +9,37 @@ logging.basicConfig(format="- %(message)s", filemode='w', stream=sys.stdout)
 logger = logging.getLogger()
 
 
+def function_details(func):
+    '''
+    Designed to be used as a wrapper to functions that contain
+    logging. When logginglevel='DEBUG' functions wrapped with this
+    function will contain a log statement printing which function has been
+    called.
+    
+    NOTE: The func doesn't actually need to have a logginglevel arguement
+    NOTE2: A default arguement of 'logginglevel="DEBUG"' will not trigger this.
+           This must be input into the function.
+    
+    Example
+    @function_detials
+    def my_func():
+        pass
+    
+    my_func(logginglevel='DEBUG')
+    
+    '''
+    def inner_func(*args, **kwargs):
+        
+        if 'logginglevel' in kwargs:
+            logginglevel = kwargs['logginglevel']
+        else: 
+            logginglevel = 'ERROR'
+        change_logging_level(logginglevel)
+        fname = func.__name__
+        logger.info(f'--- Running function {fname!r}')
+        return func(*args, **kwargs)
+    return inner_func
+
 def get_notebook_logger():
     import logging, sys
     logging.basicConfig(format=" - %(message)s", filemode='w', stream=sys.stdout)
@@ -19,6 +50,9 @@ def get_notebook_logger():
 
 def change_logging_level(logginglevel: str):
     eval(f'logging.getLogger().setLevel(logging.{logginglevel})')
+    
+    
+change_logginglevel = change_logging_level
 
 def create_period_list(step: int, end:int,  start:int = 0):
     '''Creates a list of tuples between start and end, with step 'step'

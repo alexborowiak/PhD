@@ -16,7 +16,7 @@ import utils
 logger = utils.get_notebook_logger()
 
 
-
+from numpy.typing import ArrayLike
 
 
 @xr.register_dataarray_accessor('clima')
@@ -125,20 +125,20 @@ class DetrendMethods:
         return self._obj - self.trend_fit(self._obj, *args, **kwargs)
 
 
-def __mult_func(arr, arr2):
-    return arr * arr2
+# def __mult_func(arr, arr2):
+#     return arr * arr2
 
-def __grid_gradient(arr, axis):
-    xs = np.arange(arr.shape[axis])
+# def __grid_gradient(arr, axis):
+#     xs = np.arange(arr.shape[axis])
 
-    xs_mult_arr = np.apply_along_axis(__mult_func, axis=axis, arr=arr, arr2=xs)
-    denominator = np.mean(xs) **2 - np.mean(xs**2)
+#     xs_mult_arr = np.apply_along_axis(__mult_func, axis=axis, arr=arr, arr2=xs)
+#     denominator = np.mean(xs) **2 - np.mean(xs**2)
 
-    t1 = np.nanmean(xs) * np.nanmean(arr, axis=axis)
-    t2 = np.nanmean(xs_mult_arr, axis=axis)
-    numerator = (t1-t2)
-    result = numerator/denominator
-    return result        
+#     t1 = np.nanmean(xs) * np.nanmean(arr, axis=axis)
+#     t2 = np.nanmean(xs_mult_arr, axis=axis)
+#     numerator = (t1-t2)
+#     result = numerator/denominator
+#     return result        
  
     
 @xr.register_dataarray_accessor('sn')
@@ -147,72 +147,25 @@ class SignalToNoise:
         self._obj = xarray_obj
     
 
-    
     @staticmethod
-    def __grid_gradient(arr, axis):
-        def __mult_func(arr, arr2):
+    def __grid_gradient(arr: ArrayLike, axis: int, xs:ArrayLike=None, mean_xs=None, denominator=None):
+        def __mult_func(arr:ArrayLike, arr2:ArrayLike):
             return arr * arr2
         
-        xs = np.arange(arr.shape[axis])
-
+        # xs is need only when it is not provided AND
+        # what is calculated from it is not provided (denominator and mean_xs)
+        if xs is None: xs = np.arange(arr.shape[axis])
+        if denominator is None: denominator = np.mean(xs) **2 - np.mean(xs**2)
+        if mean_xs is None: mean_xs = np.nanmean(xs)
+        if isinstance(axis, tuple): axis = axis[0]
         xs_mult_arr = np.apply_along_axis(__mult_func, axis=axis, arr=arr, arr2=xs)
-        denominator = np.mean(xs) **2 - np.mean(xs**2)
 
-        t1 = np.nanmean(xs) * np.nanmean(arr, axis=axis)
+        t1 = mean_xs * np.nanmean(arr, axis=axis)
         t2 = np.nanmean(xs_mult_arr, axis=axis)
         numerator = (t1-t2)
         result = numerator/denominator
         return result    
         
-    @staticmethod
-    def trend_line(x, use = [0][0]):
-        '''
-        Parameters
-        ----------
-        x: the y values of our trend
-        use: 
-        [0][0] will just return the gradient
-        [0,1] will return the gradient and y-intercept.
-        Previosly: _grid_trend
-        '''
-        if all(~np.isfinite(x)):
-            return np.nan
-
-        t = np.arange(len(x))
-
-        # Getting the gradient of a linear interpolation
-        idx = np.isfinite(x) #checking where the nans.
-        x = x[idx]
-        t = t[idx]
-
-        if len(x) < 3:
-            return np.nan
-
-        poly = np.polyfit(t,x,1)
-
-        return poly[use]
-    
-    @staticmethod
-    def _apply_along_helper(arr, axis, func1d,logginglevel='ERROR'):
-        '''
-        Parameters
-        -------
-        arr : an array
-        axis: the axix to apply the grid_noise function along
-
-
-        Example
-        --------
-        >>> ipsl_anom_smean.rolling(time = ROLL_PERIOD, min_periods = MIN_PERIODS, center = True)\
-        >>>    .reduce(apply_along_helper, grid_noise_detrend)
-        '''
-
-        # If axis is 1D then might become int. Otherwise is array.
-        # TODO: Should this be 0 axis though???
-        axis = axis if isinstance(axis, int) else axis[0]
-
-        # func1ds, axis, arr 
-        return np.apply_along_axis(func1d, axis, arr)   
 
     def adjust_time_from_rolling(self, window, logginglevel='ERROR'):
         
@@ -249,7 +202,12 @@ class SignalToNoise:
 
         logger.debug(f'{window=}, {min_periods=}\ndata=\n{data}')
         # Rolling gradient * window
-        signal_da = data.rolling(time = window, min_periods = min_periods, center = True).reduce(self.__grid_gradient) * window
+        xs = np.arange(window)
+        mean_xs = np.nanmean(xs)
+        denominator = np.mean(xs) **2 - np.mean(xs**2)
+        mean_xs = np.nanmean(xs)
+        signal_da = data.rolling(time=window, min_periods=min_periods, center=True).reduce(
+            self.__grid_gradient, xs=xs, mean_xs=mean_xs, denominator=denominator) * window
     
         signal_da = signal_da.sn.adjust_time_from_rolling(window = window, logginglevel=logginglevel)
     
@@ -259,35 +217,6 @@ class SignalToNoise:
 
         return signal_da
     
-    
-    def calculate_rolling_signal(self, window:int = 61, min_periods:int = 0, logginglevel='ERROR') -> xr.DataArray:
-        '''
-        Previosuly signal_grad
-        '''
-        
-        utils.change_logging_level(logginglevel)
-
-        logger.info("Calculting the rolling signal")
-        
-        data = self._obj
-        
-        # If no min_periods, then min_periods is just roll_period.
-        if ~min_periods:
-            min_periods = window
-
-        logger.debug(f'{window=}, {min_periods=}\ndata=\n{data}')
-        # Rolling gradient * window
-        signal_da = data.rolling(time = window, min_periods = min_periods, center = True)\
-            .reduce(self._apply_along_helper, func1d = self.trend_line) * window
-    
-        signal_da = signal_da.sn.adjust_time_from_rolling(window = window, logginglevel=logginglevel)
-    
-        signal_da.name = 'signal'
-        
-        signal_da = signal_da.expand_dims('window').assign_coords(window=('window', [window]))
-
-        return signal_da
-
     
     def calculate_rolling_noise(self, window = 61, min_periods = 0,logginglevel='ERROR') -> xr.DataArray:
         
@@ -355,7 +284,84 @@ class ClimatologyFunctionDataSet:
         return xr.merge(to_merge, compat='override')
     
 
+#     def calculate_rolling_signal(self, window:int = 61, min_periods:int = 0, logginglevel='ERROR') -> xr.DataArray:
+#         '''
+#         Previosuly signal_grad
+#         '''
+        
+#         utils.change_logging_level(logginglevel)
+
+#         logger.info("Calculting the rolling signal")
+        
+#         data = self._obj
+        
+#         # If no min_periods, then min_periods is just roll_period.
+#         if ~min_periods:
+#             min_periods = window
+
+#         logger.debug(f'{window=}, {min_periods=}\ndata=\n{data}')
+#         # Rolling gradient * window
+#         signal_da = data.rolling(time = window, min_periods = min_periods, center = True)\
+#             .reduce(self._apply_along_helper, func1d = self.trend_line) * window
     
+#         signal_da = signal_da.sn.adjust_time_from_rolling(window = window, logginglevel=logginglevel)
+    
+#         signal_da.name = 'signal'
+        
+#         signal_da = signal_da.expand_dims('window').assign_coords(window=('window', [window]))
+
+#         return signal_da
+    
+    
+#     @staticmethod
+#     def trend_line(x, use = [0][0]):
+#         '''
+#         Parameters
+#         ----------
+#         x: the y values of our trend
+#         use: 
+#         [0][0] will just return the gradient
+#         [0,1] will return the gradient and y-intercept.
+#         Previosly: _grid_trend
+#         '''
+#         if all(~np.isfinite(x)):
+#             return np.nan
+
+#         t = np.arange(len(x))
+
+#         # Getting the gradient of a linear interpolation
+#         idx = np.isfinite(x) #checking where the nans.
+#         x = x[idx]
+#         t = t[idx]
+
+#         if len(x) < 3:
+#             return np.nan
+
+#         poly = np.polyfit(t,x,1)
+
+#         return poly[use]
+    
+#     @staticmethod
+#     def _apply_along_helper(arr, axis, func1d,logginglevel='ERROR'):
+#         '''
+#         Parameters
+#         -------
+#         arr : an array
+#         axis: the axix to apply the grid_noise function along
+
+
+#         Example
+#         --------
+#         >>> ipsl_anom_smean.rolling(time = ROLL_PERIOD, min_periods = MIN_PERIODS, center = True)\
+#         >>>    .reduce(apply_along_helper, grid_noise_detrend)
+#         '''
+
+#         # If axis is 1D then might become int. Otherwise is array.
+#         # TODO: Should this be 0 axis though???
+#         axis = axis if isinstance(axis, int) else axis[0]
+
+#         # func1ds, axis, arr 
+#         return np.apply_along_axis(func1d, axis, arr)       
     
 
 # @xr.register_dataset_accessor('sn_ds')
@@ -392,7 +398,7 @@ class ClimatologyFunctionDataSet:
 #         stable_sn_ds = xce.xr_dict_to_xr_dataset(stable_sn_dict)
 #         unstable_sn_ds = xce.xr_dict_to_xr_dataset(unstable_sn_dict)
                          
-        return stable_sn_ds, unstable_sn_ds
+#         return stable_sn_ds, unstable_sn_ds
 
 
 # @xr.register_dataarray_accessor('correct_data')

@@ -1,6 +1,10 @@
 from enum import Enum
 
 
+class detrendingMethods(str, Enum):
+    POLYNOMIAL = 'polynomial'
+    LOWESS = 'lowess'
+
 class ExperimentTypes(str, Enum):
     CONTROL = 'control'
     ABRUPT4X = 'abrupt4x'

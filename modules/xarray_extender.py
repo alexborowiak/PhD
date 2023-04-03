@@ -1,11 +1,11 @@
-# +
 import xarray as xr
 import numpy as np
 
+import utils
+logger = utils.get_notebook_logger()
+
 from typing import Dict
 
-
-# -
 
 def xr_dict_to_xr_dataset(data: Dict[str, xr.Dataset]):
     '''Takes a dicionary that has the model name and then model values
@@ -38,9 +38,9 @@ def dask_percentile(array: np.ndarray, axis: str, q: float):
     -------
     xr.Dataset.data.reduce(xca.dask_percentile,dim='time', q=90)
     '''
-#     array = array.rechunk({axis: -1})
+    array = array.rechunk({axis: -1})
     return array.map_blocks(
-        np.percentile,
+        np.nanpercentile,
         axis=axis,
         q=q,
         dtype=array.dtype,
@@ -84,7 +84,6 @@ def convert_dimension_to_data_vars(da: xr.DataArray, dim:str) -> xr.Dataset:
             UKESM1-0-LL     (time) float64 2.681 2.827 2.819 2.842 ... 2.888 2.884 2.924
       
     '''
-    dim = 'model'
     dim_values = da[dim].values
 
     to_merge = []
@@ -98,15 +97,43 @@ def convert_dimension_to_data_vars(da: xr.DataArray, dim:str) -> xr.Dataset:
     return merged_ds
 
 
-def get_median_and_uncertainty_across_dim(ds: xr.Dataset, dim: str):
-    
-    median_ds = ds.median(dim=dim).rename({'time': 'median_value'})
-    uncertainty_ds = np.abs((ds.max(dim=dim) -\
-                            ds.min(dim=dim))/2)
-    
-    uncertainty_ds = uncertainty_ds.rename({'time': 'uncertainty'})
 
-    return xr.merge([median_ds, uncertainty_ds])
+def add_lower_upper_to_dataset(da: xr.DataArray, lower: xr.DataArray, upper:xr.DataArray) -> xr.Dataset:
+    '''Convert the dataarray to dataset, then ddd the lower and upper bounds
+    as a variable.'''
+    ds = da.to_dataset(name='signal_to_noise')
+    
+    ds['lower_bound'] = lower
+    ds['upper_bound'] = upper
+    
+    return ds
+
+
+# previosly get_median_and_uncertainty_across_dim
+def get_average_and_uncertainty_across_dim(ds:xr.Dataset, dim:str, var:str='time', logginglevel='INFO',
+                                           averaging_method='mean', uncertainty_method:str='percent'):
+    '''
+    Calcualtes the median and unvertainty
+    uncertainty_method: str
+        Options: percent, max_min
+    '''
+    
+    utils.change_logginglevel(logginglevel)
+    logger.info(f'{averaging_method=}, {uncertainty_method=}')
+    if averaging_method == 'median':
+        average_ds = ds.median(dim=dim)
+    elif averaging_method == 'mean':
+        average_ds = ds.mean(dim=dim)
+        
+    if uncertainty_method == 'percent':
+        uncertainty_ds = np.abs((ds.max(dim=dim) - ds.min(dim=dim)) *100/average_ds)
+    elif uncertainty_method == 'max_min':
+        uncertainty_ds = np.abs((ds.max(dim=dim) - ds.min(dim=dim))/2)
+    
+    average_ds = average_ds.rename({var: 'average_value'})
+    uncertainty_ds = uncertainty_ds.rename({var: 'uncertainty'})
+
+    return xr.merge([average_ds, uncertainty_ds])
 
 
 
@@ -142,8 +169,8 @@ class Utils:
         Bounds on variable by two other. Useful for getting where data is stable
 
     
-        unstable_sn_multi_window_da = sn_multiwindow_ds.utils.between(
-        'signal_to_noise', less_than_var = 'upper_bound', greater_than_var = 'lower_bound')
+        stable_sn_multi_window_da = sn_multiwindow_ds.utils.between(
+                                'signal_to_noise', less_than_var = 'upper_bound', greater_than_var='lower_bound')
         '''
         ds = self._obj
         
@@ -151,14 +178,12 @@ class Utils:
     
     def above_or_below(self, main_var: str, greater_than_var: str, less_than_var: str):
         '''
-        
          Bounds on variable by two other. Useful for getting where data is stable
-        
-        
+            
+         Example
+         -------
          unstable_sn_multi_window_da = sn_multiwindow_ds.utils.above_or_below(
-        'signal_to_noise', greater_than_var = 'upper_bound', less_than_var = 'lower_bound')
-        
-        
+                                'signal_to_noise', greater_than_var='upper_bound', less_than_var='lower_bound')
         '''
         ds = self._obj
         
