@@ -583,10 +583,10 @@ def get_dataarray_stable_year_multi_window(da:xr.DataArray, max_effective_length
     if max_effective_length is None:
         max_effective_length = len(da.time.values)
     
-    print(f'Replacing points greater than {max_effective_length} with {max_effective_length+1}')
+    print(f'Replacing points greater than {max_effective_length} with {max_effective_length}')
     concat_da = xr.where(
         concat_da > max_effective_length,
-        max_effective_length+1, concat_da)
+        max_effective_length, concat_da)
     
     # Bug can occur where all nan values become very negative. This just returns them to beign the max
     concat_da = xr.where(concat_da < 0, max_effective_length, concat_da).fillna(max_effective_length)
@@ -607,7 +607,7 @@ def get_dataset_stable_year_multi_window(ds:xr.Dataset, max_effective_length:int
                      .to_array(dim='variable')
                      .to_dataset(name='time'))
 
-def get_stable_year_ds(sn_multi_ds):
+def get_stable_year_ds(sn_multi_ds, max_effective_length:int=None):
     '''
     Gets the year in which the time series first becomes styable
     '''
@@ -615,7 +615,7 @@ def get_stable_year_ds(sn_multi_ds):
     unstable_sn_ds = sn_multi_ds.utils.above_or_below(
             'signal_to_noise', greater_than_var = 'upper_bound', less_than_var = 'lower_bound')
 
-    stable_point_ds = get_dataset_stable_year_multi_window(unstable_sn_ds)
+    stable_point_ds = get_dataset_stable_year_multi_window(unstable_sn_ds, max_effective_length=max_effective_length)
     return stable_point_ds
 
 

@@ -17,15 +17,16 @@ def create_levels(vmax:float, vmin:float=None, step:float=1)->np.ndarray:
     vmin = -vmax if vmin is None else vmin
     return np.arange(vmin, vmax + step, step)
 
-def add_figure_label(ax: plt.Axes, label: str):
-    ax.annotate(label, xy = (0.01,1.05), xycoords = 'axes fraction', size=constants.annotate_size)
+def add_figure_label(ax: plt.Axes, label:str, font_scale:int=1):
+    ax.annotate(label, xy = (0.01,1.05), xycoords = 'axes fraction', size=PlotConfig.label_size*font_scale)
 
 def format_axis(ax: plt.Axes, title:str=None, xlabel:str=None, ylabel:str=None, invisible_spines=None, 
-               font_scale=1, rotation=0, labelpad=100):
+               font_scale=1, rotation=0, labelpad=100, xlabelpad=10):
     '''Formatting with no top and right axis spines and correct tick size.'''
-    if xlabel: ax.set_xlabel(xlabel, rotation=rotation, fontsize=PlotConfig.label_size*font_scale)
+    if xlabel: ax.set_xlabel(xlabel, rotation=rotation, fontsize=PlotConfig.label_size*font_scale, ha='center', va='center',
+                            labelpad=xlabelpad)
     if ylabel: ax.set_ylabel(ylabel, rotation=rotation, labelpad=labelpad*font_scale,
-                             fontsize=PlotConfig.label_size*font_scale)
+                             fontsize=PlotConfig.label_size*font_scale, ha='center', va='center')
     if title: ax.set_title(title, fontsize=PlotConfig.title_size*font_scale)
     ax.tick_params(axis='x', labelsize=PlotConfig.tick_size*font_scale)
     ax.tick_params(axis='y', labelsize=PlotConfig.tick_size*font_scale)

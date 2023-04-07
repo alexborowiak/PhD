@@ -8,7 +8,7 @@ from typing import Union
 from matplotlib import ticker as mticker
 import matplotlib.gridspec as gridspec
 from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
-from typing import Dict
+from typing import Dict, List
 import exceptions
 # from constants import MODEL_PARAMS
 from pprint import pprint, pformat
@@ -19,9 +19,10 @@ logger = logging.getLogger()
 sys.path.append('../')
 import constants
 import plotting_functions
+from matplotlib.patches import Rectangle
 
 # Usually use a red cmap, so making sure the lines are not red.
-NO_RED_COLORS = ('darkblue', 'green','yellow', 'mediumpurple', 'black',
+NO_RED_COLORS = ('k', 'green','yellow', 'mediumpurple', 'black',
                  'lightgreen','lightblue', 'greenyellow')
 MODEL_PROFILES = {'longrunmip': constants.LONGRUNMIP_MODEL_PARAMS, 'zecmip': constants.ZECMIP_MODEL_PARAMS}
 
@@ -34,6 +35,42 @@ experiment_colors = {'tas_global': 'red', 'tas_land_global': 'lightcoral',
                      'pr_global': 'green', 'pr_land_global': 'yellowgreen', 
                      'tos_sea_global': 'blue'}
 
+
+
+def format_plot(fig, ax):
+    '''
+    Small function for formatting map plots
+    Reseson
+    ------
+    Usef in 07_exploring_consecutive_metrics_all_models_(nb_none)
+    '''
+    ax.coastlines(alpha=0.7)
+    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True)
+    gl.xformatter = LONGITUDE_FORMATTER
+    gl.yformatter = LATITUDE_FORMATTER
+    gl.left_labels = False
+    gl.top_labels = False
+
+
+# def format_colorbar(pcolor, gs=None, cax:plt.Axes=None, tick_symbol:str='%'):
+#     '''
+#     Creates a colorbar that takes up all columns in the 0th row.
+#     The tick labels are percent
+    
+#     Reason
+#     ------
+#     In 07_exploring_consecutive_metrics_all_models_(nb_none) a colorbar 
+#     of this type is used repeatedly. 
+#     '''
+#     cax = plt.subplot(gs[0,:]) if not cax else cax
+
+#     cbar = plt.colorbar(pcolor, cax=cax, orientation='horizontal')
+#     xticks = cbar.ax.get_xticks()
+#     cbar.ax.set_xticks(xticks)
+#     if tick_sybmol: cbar.ax.set_xticklabels([str(int(xt)) + tick_symbol for xt in xticks]);
+#     cbar.ax.tick_params(labelsize=labelsize)
+    
+#     return cbar
 
 def highlight_plot(ax, ds, ds_highlight=None, legend_on:bool =True, yaxis_right:bool=False, label=None,
                   color='tomato', highlight_color='darkred', bbox_to_anchor = [-0.03, 1]):
@@ -134,65 +171,18 @@ def temperature_vs_sn_plot(ax,
 
 
 
-def sn_plot_kwargs(kwargs, logginglevel='ERROR'):
-    
-    utils.change_logging_level(logginglevel)
-    # The default plot kwargs
-    plot_kwargs = dict(height=12, width=22, hspace=0.3, vmin=-8, vmax=8, step=2, 
-                       cmap = 'RdBu_r', line_color = 'limegreen', line_alpha=0.65, 
-                       ax2_ylabel = 'Anomaly', cbar_label = 'Signal-to-Noise', cbartick_offset=0,
-                       title='', label_size=12, extend='both', xlowerlim=None, xupperlim=None,  filter_max=True,)
-    
-    
-    # Merging the dicionaries
-    plot_kwargs = {**plot_kwargs, **kwargs}
-    
-    
-    if 'filter_max' not in plot_kwargs.keys():
-        plot_kwargs['filter_max'] = False
+plot_kwargs = dict(height=12, width=22, hspace=0.3, #vmin=-8, vmax=8, step=2, 
+                   cmap = 'RdBu_r', line_color = 'limegreen', line_alpha=0.65, 
+                   ax2_ylabel = 'Anomaly', cbar_label = 'Signal-to-Noise', cbartick_offset=0,
+                   axes_title='',
+                   title='', label_size=12, extend='both', xlowerlim=None, xupperlim=None,  filter_max=True,)
 
-    
-    plot_kwargs['levels'] = np.arange(plot_kwargs['vmin'], # Min
-                       plot_kwargs['vmax'] + plot_kwargs['step'], # Max
-                       plot_kwargs['step']) # Step
-    
-    plot_kwargs['cmap'] = plt.cm.get_cmap(plot_kwargs['cmap'], len(plot_kwargs['levels']) + 1)
-
-        
-    if 'cbar_xticklabels' in kwargs.keys():
-        plot_kwargs['cbar_xticklabels'] = kwargs['cbar_xticklabels']
-    else:
-        plot_kwargs['cbar_xticklabels'] = plot_kwargs['levels']
-
-    
-    if 'cbar_ticks' in kwargs.keys():
-        cbar_ticks = kwargs['cbar_ticks']
-    elif 'cbartick_offset' in kwargs.keys(): # TODO -  I don't think this works
-        cbar_ticks =  np.arange(plot_kwargs['vmin']+ plot_kwargs['cbartick_offset'],
-                                plot_kwargs['vmax']+ plot_kwargs['cbartick_offset'],
-                                plot_kwargs['step'])
-        # When this happens we usually want to cut off the last value
-        plot_kwargs['cbar_xticklabels'] = plot_kwargs['cbar_xticklabels'][0:len(cbar_ticks)]
-
-    else:  
-        cbar_ticks = plot_kwargs['levels']
-                                
-                                
-    plot_kwargs['cbar_ticks'] = cbar_ticks[:len(plot_kwargs['cbar_xticklabels'])]
-    
-    
-    if 'ax2_ylabel' in kwargs.keys():
-        cbar_ticks = kwargs['ax2_ylabel']
-   
-    
-    logger.info(pformat(plot_kwargs))
-    return plot_kwargs
 
 
 def plot_all_coord_lines(da: xr.DataArray, coord='model', exp_type=None,
                          fig=None, ax:plt.Axes=None, figsize:tuple=(15,7),
                          font_scale=1, consensus=True, xlabel=None, ylabel=None,
-                         bbox_to_anchor=(1.02,1),
+                         bbox_to_anchor=(1.02,1), ncol=4, add_legend=True, 
                         **kwargs):
     '''
     Plots all of the values in time for a coordinate. E.g. will plot all of the models values
@@ -202,39 +192,39 @@ def plot_all_coord_lines(da: xr.DataArray, coord='model', exp_type=None,
     fig = plt.figure(figsize=figsize) if not fig else fig
     ax = fig.add_subplot(111) if not ax else ax
     
-    coord_values = list(da[coord].values)
+    coord_values = da[coord].values.flatten() # Flatten in-case 0D array
+    # coord_values = coord_values if coord_values else [coord_values]
+    
     time = da.time.values
-    logger.info(f'{coord_values=}')
+    print(f'{coord_values=}, {type(coord_values)}', coord_values.shape, len(coord_values))
     if exp_type:
         MODEL_PARAMS = MODEL_PROFILES[exp_type]
         coord_values = [model for model in list(MODEL_PARAMS) if model in coord_values]
     
     for i, coord_value in enumerate(coord_values):
+        print(coord_value)
         logger.debug(f'{i} {coord_value}, ')
        
-        if exp_type:
-            c = MODEL_PARAMS[coord_value]['color']
-        else:
-            c = NO_RED_COLORS[i]
+        if exp_type: c = MODEL_PARAMS[coord_value]['color']
+        else: c = NO_RED_COLORS[i]
 
-        
         label=coord_value
         if exp_type:
             if coord_value in list(MODEL_PARAMS):
                 ECS = MODEL_PARAMS[coord_value]['ECS']
                 label += f' ({ECS}K)' 
-            
-        ax.plot(time, da.loc[{coord:coord_value}].values,
+        da_to_plot = da.loc[{coord:coord_value}].values if len(coord_values) > 1 else da.values
+    
+        ax.plot(time, da_to_plot,
                 alpha=kwargs['line_alpha'] if 'line_alpha' in kwargs else 1,
                 zorder=1000, label=label, linewidth=2,  
                 c=c)
-    if consensus: ax.plot(time, da.mean(dim=coord).values,
+    if consensus and len(coord_values) > 1: ax.plot(time, da.mean(dim=coord).values,
                 alpha=kwargs['line_alpha'] if 'line_alpha' in kwargs else 1,
                 zorder=1000, label='Mean', linewidth=2,  
                 c='black')
-    
-    if len(coord_values) > 1:
-        leg = ax.legend(ncol=4, bbox_to_anchor=bbox_to_anchor,
+    if len(coord_values) > 1 and add_legend:
+        leg = ax.legend(ncol=ncol, bbox_to_anchor=bbox_to_anchor,
                         fontsize=constants.PlotConfig.legend_text_size*font_scale)
         leg.set_title('Model')
         leg.get_title().set_fontsize(constants.PlotConfig.legend_title_size*font_scale)
@@ -243,117 +233,51 @@ def plot_all_coord_lines(da: xr.DataArray, coord='model', exp_type=None,
     return fig, ax
 
 
-def sn_multi_window_in_time(unstable_da:xr.DataArray,  stable_da:xr.DataArray,
-                            temp_da: Union[xr.DataArray, xr.Dataset], stable_point_ds:xr.Dataset=None,
-                            fig=None, gs=None, ax1=None, max_color_lim=None, 
-                            logginglevel='ERROR', exp_type=None, font_scale=1.5,
-                            **kwargs):
-    
+
+def create_levels(vmax:float, vmin:float=None, step:float=1)->np.ndarray:
     '''
-    Plot with window on LHS and temperature anomlay on RHS
-    
-    Parameters
-    ----------
-    unstable_sn_multi_window_da: xr.DataArray - 2D array of dims time and window
-    stable_sn_multi_window_da: xr.DataArray - 2D array of dims time and window
-    abrupt_anom_smean: xr.DataArray - 1D array with time dimension
-    
-    
-    
-    Returns
-    --------
-    fig, ax1, ax2, ax3, cbar
-    
-    Default values
-    --------------
-    height = 15, width = 7, hspace=0.3, vmin = -8, vmax = 8, step = 2, 
-    cmap = 'RdBu_r', line_color = 'limegreen', line_alpha = 0.5, 
-    cbar_label = 'S/N', cbartick_offset = 0, title='', label_size = 12, extend='both', 
-    xlowerlim = None, xupperlim = None
+    Ensures that all instances of creating levels using vmax + step as the max.
     '''
-    mpl.rcParams.update(mpl.rcParamsDefault)
-    utils.change_logging_level(logginglevel)
-    
-    plot_kwargs = sn_plot_kwargs(kwargs, logginglevel)
-      
-    # ---> Updating x lims
-    xlims = dict(time=slice(plot_kwargs['xlowerlim'], plot_kwargs['xupperlim']))
-    unstable_da = unstable_da.isel(**xlims)
-    stable_da = stable_da.isel(**xlims)
-    temp_da = temp_da.isel(**xlims)
-    
-    if max_color_lim:
-        unstable_da = unstable_da.isel(time=slice(None, max_color_lim))
+    vmin = -vmax if vmin is None else vmin
+    return np.arange(vmin, vmax + step, step)
 
-    unstable_da['time'] = unstable_da.time.dt.year.values
-    stable_da['time'] = stable_da.time.dt.year.values
-    temp_da['time'] = temp_da.time.dt.year.values
-    
-    # ---> Creating plot
-    fig = plt.figure(figsize=(plot_kwargs['width'], plot_kwargs['height'])) if not fig else fig
-    gs = gridspec.GridSpec(2,1, height_ratios=[1, 0.1], hspace=plot_kwargs['hspace']) if not gs else gs
-    ax1 = fig.add_subplot(gs[0])
-    ax2 = ax1.twinx()
-
-    # ---> Plotting colors
-    if plot_kwargs['filter_max'] == True:
-        unstable_da = unstable_da.where((unstable_da < plot_kwargs['vmax']), plot_kwargs['vmax'] - .01)
-    
-    stable_da = xr.where(np.isfinite(stable_da), .4, 0) # Only want grey
-    stable_da.plot(ax=ax1, cmap='gist_gray_r', alpha=0.3,vmax=1, vmin=0, add_colorbar=False)
-    
-    cs = unstable_da.plot(ax=ax1, levels=plot_kwargs['levels'], cmap=plot_kwargs['cmap'], 
-                          extend=plot_kwargs['extend'], add_colorbar=False)
-    
-    # ---> Stable Year 
-    if stable_point_ds: stable_point_ds.time.plot(y='window',  ax=ax1, color='k')
-
-    # ---> Temperature Anomaly
-    plot_all_coord_lines(da=temp_da, ax=ax2, fig=fig, exp_type=exp_type, font_scale=font_scale, bbox_to_anchor=(1, 1.3))
-                         #bbox_to_anchor=(1.07,1.1))
-    
-    
-    # ---> Colorbar
-    cax = fig.add_subplot(gs[1])
-    cbar = fig.colorbar(cs, cax=cax, extend=plot_kwargs['extend'], orientation='horizontal')
-    cbar.set_label(plot_kwargs['cbar_label'], size=constants.PlotConfig.cmap_title_size*font_scale)
-    cbar.set_ticks(plot_kwargs['cbar_ticks'])
-    cbar.ax.set_xticklabels(plot_kwargs['cbar_xticklabels'])
-    cbar.ax.tick_params(labelsize=constants.PlotConfig.legend_text_size*font_scale)
-    logger.debug(f'cbar x-tick labels = {plot_kwargs["cbar_xticklabels"]}')
-    
-
-    
-    # ---> Axes formatting
-    ax1.set_xlim(plot_kwargs['xlowerlim'], plot_kwargs['xupperlim'])
-    xlabel = 'Time (Years)' if 'xlabel' not in plot_kwargs else plot_kwargs['xlabel']
-    plotting_functions.format_axis(ax1, xlabel=xlabel, ylabel='Window Length\n(Years)', font_scale=font_scale)
-    plotting_functions.format_axis(ax2, xlabel=xlabel, ylabel=plot_kwargs['ax2_ylabel'], font_scale=font_scale)
-    
-    ax1.set_title('')
-    ax2.set_title('')
-    
-    fig.suptitle(plot_kwargs['title'], fontsize=18, y=0.92)
-  
-    return (fig, [ax1, ax2, cax], cbar)
-
-
-def format_plot(fig, ax):
+def create_colorbar(plot, cax, levels, ticks='', cbar_title='', 
+                    labelpad=30, title_rotation=0, rotation=0, orientation='horizontal', 
+                    extend='neither', tick_offset=None, cut_ticks=1, shrink=1, round_level=2,
+                    font_scale=1):
     '''
-    Small function for formatting map plots
-    Reseson
-    ------
-    Usef in 07_exploring_consecutive_metrics_all_models_(nb_none)
+    plot: the plot that th cbar is refering to.
+    caxes: the colorbar axes.
+    levels: the levels on the plot
     '''
-    ax.coastlines(alpha=0.7)
-    gl = ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=True)
-    gl.xformatter = LONGITUDE_FORMATTER
-    gl.yformatter = LATITUDE_FORMATTER
-    gl.left_labels = False
-    gl.top_labels = False
+    
+    cbar = plt.colorbar(plot, cax=cax, orientation=orientation, extend=extend, shrink=shrink)
+    
+    tick_locations = levels
+    tick_labels = levels
+    if tick_offset == 'center':
+        tick_locations = levels[:-1] + np.diff(levels)/2
+        tick_labels = tick_labels[:-1]
+    if cut_ticks > 1:
+        tick_locations = tick_locations[::cut_ticks]
+        tick_labels = tick_labels[::cut_ticks]
+    
+    cbar.set_ticks(tick_locations)    
+    tick_labels = np.round(tick_labels, round_level)
+        
+    if orientation == 'horizontal':
+        cbar.ax.set_xticklabels(tick_labels, fontsize=constants.PlotConfig.legend_text_size*font_scale, rotation=rotation)
+        cbar.ax.set_title(cbar_title, size=constants.PlotConfig.cmap_title_size*font_scale)
+    else:
+        cbar.ax.set_yticklabels(tick_labels, fontsize=constants.PlotConfig.legend_text_size*font_scale, 
+                                rotation=rotation)
+        cbar.ax.set_ylabel(cbar_title, size=constants.PlotConfig.label_size*cmap_title_size, 
+                           rotation=title_rotation, labelpad=labelpad)
+        
+    return cbar
 
 
-def format_colorbar(gs, pcolor, labelsize=10, cax=None, tick_symbol='%'):
+def format_colorbar(pcolor, gs=None, cax:plt.Axes=None, tick_symbol:str='%'):
     '''
     Creates a colorbar that takes up all columns in the 0th row.
     The tick labels are percent
@@ -372,6 +296,117 @@ def format_colorbar(gs, pcolor, labelsize=10, cax=None, tick_symbol='%'):
     cbar.ax.tick_params(labelsize=labelsize)
     
     return cbar
+
+
+def plot_heatmap(da:xr.DataArray, fig:plt.figure=None, gs=None, ax:plt.Axes=None, cax:plt.Axes=None,
+                 figsize:tuple=None, cmap='Blues', extend='neither', max_color_lim:int=None,
+                 levels:list=None, vmin=None, vmax=None, step=None, 
+                 xlims:tuple=None, font_scale=1,
+                 cbar_tile:str='', tick_labels=None, add_colorbar=True, cbar_label=None,
+                 tick_offset=None, cut_ticks=1, patch=False, hspace=0,
+                 title:str=None, axes_title:str=None, labelpad=100,
+                 ylabel='Window Length\n(Years)', xlabel='Time (Years)', return_all=True, **kwargs):
+    '''
+    Plots a heatmatp of ds. Lots of options for entering different arguements
+    '''
+    
+    figsize = figsize if figsize is not None else (plot_kwargs['width'], plot_kwargs['height'])
+    fig = fig if fig is not None else plt.figure(figsize=figsize)
+    gs = (gs if gs is not None else gridspec.GridSpec(2,1, height_ratios=[1, 0.1],
+                                                      hspace=plot_kwargs['hspace']+hspace))
+    ax = ax if ax is not None else fig.add_subplot(gs[0])
+    
+    
+    if xlims is not None: da = da.isel(time=slice(*xlims))
+    if not np.issubdtype(da.time.dtype, np.int64): da['time'] = da.time.dt.year.values
+    if max_color_lim: da = da.isel(time=slice(None, max_color_lim))
+    
+    
+    if levels is not None:
+        colormap_kwargs = dict(levels=levels)
+    elif vmax is not None and step is not None:
+        levels = create_levels(vmin=vmin, vmax=vmax, step=step)
+        colormap_kwargs = dict(levels=levels)
+    else:
+        colormap_kwargs = dict(robust=True)
+    
+    cs = da.plot(ax=ax, cmap=cmap, extend=extend, add_colorbar=False, **colormap_kwargs)
+    
+    # ---> Labelling
+    plotting_functions.format_axis(ax, xlabel=xlabel, ylabel=ylabel,labelpad=labelpad, font_scale=font_scale)
+    fig.suptitle(title, fontsize=constants.PlotConfig.title_size*font_scale, y=0.92)
+    ax.set_title(axes_title, fontsize=constants.PlotConfig.title_size*font_scale)
+    if xlims is not None: ax.set_xlim(xlims)
+ 
+    # ---> Artist
+    if patch: ax.add_artist(Rectangle((max_color_lim, 0), xlims[-1]-max_color_lim,
+                                      200, color='grey', alpha=0.2, zorder=-1000))
+    
+    # ---> Colorbar
+    if add_colorbar:
+        cax = cax if cax is not None else fig.add_subplot(gs[1])
+        cbar = create_colorbar(
+            cs, cax=cax, levels=levels, extend=extend, orientation='horizontal',
+            font_scale=font_scale, cbar_title=cbar_label, tick_offset=tick_offset,
+            cut_ticks=cut_ticks)
+    if return_all:
+        return fig, gs, ax, cax
+
+
+def sn_multi_window_in_time(da:xr.DataArray, exp_type:str=None,
+                            temp_da:Union[xr.DataArray, xr.Dataset]=None,
+                            stable_point_ds:xr.Dataset=None,
+                            fig:plt.figure=None, gs=None, ax:plt.Axes=None, cax:plt.Axes=None,
+                            figsize:tuple=None, cmap='Blues', extend='neither', max_color_lim:int=None,
+                            levels:list=None, vmin=None, vmax=None, step=None, 
+                            xlims:tuple=(None,None), font_scale=1.5,
+                            cbar_tile:str='', tick_labels=None, add_colorbar=True, cbar_label=None,
+                            tick_offset=None, cut_ticks=1, patch=False, hspace=0,
+                            title:str=None, axes_title:str=None,
+                            ylabel='Window Length\n(Years)', xlabel='Time (Years)',
+                            ax2_ylabel = 'Anomaly', add_legend=True, labelpad=100, 
+                            bbox_to_anchor=(1, 1.3), stable_year_kwargs=dict(),
+                            logginglevel='ERROR', return_all=True):
+    '''
+    
+    '''
+    mpl.rcParams.update(mpl.rcParamsDefault)
+    utils.change_logging_level(logginglevel)    
+    
+     
+    # ---> Creating plot
+    fig = plt.figure(figsize=(plot_kwargs['width'], plot_kwargs['height'])) if fig is None else fig
+    gs = gridspec.GridSpec(2,1, height_ratios=[1, 0.1], hspace=plot_kwargs['hspace']) if gs is None else gs
+    ax = fig.add_subplot(gs[0]) if ax is None else ax
+    if cax is None and add_colorbar == True: cax = fig.add_subplot(gs[1])
+    
+    # ---> Stable Year 
+    stable_year_kwargs = {'color':'k', 'linestyle':':', 'linewidth':1.5, **stable_year_kwargs}
+    if stable_point_ds: stable_point_ds.time.plot(y='window', ax=ax, **stable_year_kwargs)
+
+    # ---> Plotting colors
+    fig, gs, ax, cax = plot_heatmap(da=da, fig=fig, gs=gs, ax=ax, cax=cax,
+                 figsize=figsize, cmap=cmap, extend=extend, max_color_lim=max_color_lim,
+                 levels=levels, vmin=vmin, vmax=vmax, step=step, 
+                 xlims=xlims, font_scale=font_scale,
+                 cbar_tile=cbar_tile, tick_labels=tick_labels, add_colorbar=add_colorbar, cbar_label=cbar_label,
+                 tick_offset=tick_offset, cut_ticks=cut_ticks, patch=patch, hspace=hspace,
+                 title=title, axes_title=axes_title,
+                 ylabel=ylabel, xlabel=xlabel, labelpad=labelpad)
+
+    # ---> Temperature Anomaly
+    if isinstance(temp_da, xr.DataArray):
+        ax2 = ax.twinx()
+        temp_da = temp_da.isel(time=slice(*xlims))
+        if not np.issubdtype(temp_da.time.dtype, np.int64): temp_da['time'] = temp_da.time.dt.year.values
+        plot_all_coord_lines(da=temp_da, ax=ax2, fig=fig, exp_type=exp_type, add_legend=add_legend,
+                             font_scale=font_scale, bbox_to_anchor=bbox_to_anchor)
+        plotting_functions.format_axis(ax2, xlabel=xlabel, ylabel=ax2_ylabel,
+                                       font_scale=font_scale, labelpad=labelpad)
+        ax2.set_title(None)
+
+    if return_all:
+        return (fig, [ax, ax2, cax])
 
 
 def plot_all_period_maps(ds, periods, suptitle = 'Percent of Years That are Stable', cmap = 'RdBu', col_increase = 1,
@@ -407,7 +442,7 @@ def plot_all_period_maps(ds, periods, suptitle = 'Percent of Years That are Stab
             ax.set_title(f'{formatted_period} {dvar.capitalize()}', fontsize=12);
             plot_num += 1
     
-    cbar = format_colorbar(gs, pcolor)
+    cbar = format_colorbar(pcolor, gs=gs)
     
     return fig, gs, cbar
 
@@ -440,9 +475,6 @@ def plot_year_of_stability(ds: xr.Dataset, varible_to_loop: str, title:str=None)
         title = f'{model} Year of Stabilisation {ECS}'
         
     ax.set_title(title, fontsize=25)
-
-
-#     ax.legend(fontsize=25)
     leg = ax.legend(ncol=1, frameon=True, facecolor='white', fontsize=18) # , bbox_to_anchor=[1, 0.857]
     leg.set_title('Variable')
     leg.get_title().set_fontsize('18')
@@ -452,8 +484,7 @@ def plot_year_of_stability(ds: xr.Dataset, varible_to_loop: str, title:str=None)
     ax.set_ylabel('Window Length (years)', fontsize=18)
     ax.tick_params(axis='y', labelsize=14)
     ax.tick_params(axis='x', labelsize=14)
-#     ax.set_xlabel('Year of Stabilisation', fontsize=18)
-#     ax.set_ylabel('Window lengths (years)', fontsize=18)
+
     
     return fig, ax
 
@@ -519,68 +550,108 @@ def local_stabilisation_average_year_and_uncertainty_plot(ds, plot_dict, suptitl
         cbar.ax.tick_params(labelsize=14)
     return fig
 
-def plot_all_model_multi_window_maps(ds, variable:int, plot_dict:Dict, cmap='Reds', extend='max'):
-
-    print(plot_dict)
+def __create_plot_dict(ds:xr.DataArray, dim:str, percentile:float=99, vmin=None, num_steps:int=11) -> Dict:
+    '''
+    Creates a dictionary of all of the levels on dimension
+    '''
+    dims = list(ds.dims)
+    dims_bar_dim = [d for d in dims if d != dim]
+    robust_max = ds.reduce(np.nanpercentile,q=percentile, dim=dims_bar_dim).values
+    dim_values = ds[dim].values
     
-    windows = ds.window.values
-    models = ds.model.values
-    num_cols = len(windows)
-    num_rows = len(models)
+    plot_dict = {}
+    for dv, vm in zip(dim_values, robust_max):
+        step_size_raw = vm/num_steps
+        step_size_actual = np.ceil(step_size_raw)
+        vm_actual = step_size_actual*num_steps
+        vmin = -vm_actual if vmin is None else vmin
 
-    fig = plt.figure(figsize=(6*num_cols, 4.*num_rows))
-    gs = gridspec.GridSpec(num_rows+1, num_cols, height_ratios = [0.2] + [1] * num_rows,
-                           hspace=0.2, wspace=0.2)
+        plot_dict[dv] = {'levels': np.arange(vmin, vm_actual+step_size_actual, step_size_actual)}
+    
+    
+    return plot_dict
+
+
+def __make_up_coords(ds):
+    made_up_name = '_'
+    ds =  ds.expand_dims(made_up_name).assign_coords(_=(made_up_name, ['_']))
+    return '_', ds
+
+def map_plot_all_for_coords(ds:xr.DataArray, variable:int, column_coord:str=None, row_coord:str=None,
+                            column_title_tag:str='', y=0.89, row_labels:List[str]=None, vmin=None, 
+                            plot_dict:Dict=None, cmap='Reds', extend='max', hspace=0.2, one_colorbar=False):
+
+    '''
+    Map plot for two coords
+    Updated: 27-th March 2023
+    '''
+    if isinstance(ds, xr.Dataset): ds = ds.to_array().squeeze()
+    
+    # Yes, this is weird. Looping over rows and cols later. If not colr
+    # or row lets just make one up so this all works.
+    if column_coord is None: column_coord, ds = __make_up_coords(ds)
+    if row_coord is None: row_coord, ds = __make_up_coords(ds)
+        
+    
+    column_coord_values = ds[column_coord].values; row_coord_values = ds[row_coord].values
+    row_labels = row_coord_values if row_labels is None else row_labels
+    num_cols = len(column_coord_values); num_rows = len(row_coord_values)
+    plot_dict = __create_plot_dict(ds, column_coord, vmin=vmin) if not plot_dict else plot_dict
+
+    fig = plt.figure(figsize=(6*num_cols, 4*num_rows))
+    gs = gridspec.GridSpec(num_rows+1, num_cols, height_ratios=[0.2]+[1]*num_rows,
+                           hspace=hspace, wspace=0.2)
 
     fig.suptitle(f'{constants.VARIABLE_INFO[variable]["longname"]} Year of Stabilisation', 
-                fontsize=25, y=.91)
+                fontsize=25, y=y)
 
-    axes = []
-    plots = []
+    axes = []; plots = []
 
     y_axis_kwargs = dict(xy=(-0.05, 0.5), ha='center', va='center', xycoords='axes fraction', 
-                       rotation=90, size=18)
-
-    for row, model in enumerate(models):
-        for col, window in enumerate(windows):
+                         rotation=90, size=18)
+    
+    for row, rcv in enumerate(row_coord_values):
+        for col, ccv in enumerate(column_coord_values):
             ax = fig.add_subplot(gs[row+1, col], projection=ccrs.PlateCarree())
-            da = ds.time.sel(window=window, model=model)
-            plot = da.plot(ax=ax, cmap=cmap, levels = plot_dict[window]['levels'], 
+            da = ds.loc[{column_coord:ccv, row_coord:rcv}]
+            plot = da.plot(ax=ax, cmap=cmap, levels = plot_dict[ccv]['levels'], 
                            add_colorbar=False, extend=extend)
-            ax.set_title('')
-            if not col:
-                ax.annotate(f'{model}', **y_axis_kwargs)
-            ax.coastlines()
-            format_plot(fig, ax)
-            axes.append(ax)
-            plots.append(plot)
+            
+            if not col: ax.annotate(f'{row_labels[row]}', **y_axis_kwargs)
+            format_plot(fig, ax); ax.coastlines(); ax.set_title(None)
+            axes.append(ax); plots.append(plot)
 
-    for window,ax in zip(windows, axes[:len(windows)]):
-        ax.set_title(f'{window} Year Window', fontsize=18)
+    for column_coord,ax in zip(column_coord_values, axes[:len(column_coord_values)]):
+        ax.set_title(f'{column_coord} {column_title_tag}', fontsize=18)
 
-    for plot_num, plot in enumerate(plots[:len(windows)]):
-        cax = plt.subplot(gs[0, plot_num])
+    for plot_num, plot in enumerate(plots[:len(column_coord_values)]):            
+        cax = plt.subplot(gs[0, plot_num] if not one_colorbar else gs[0, :])
         cbar = plt.colorbar(plot, cax=cax, orientation='horizontal')
         cbar.ax.set_title('Year of Stabilisation', fontsize=18)
         cbar.ax.tick_params(labelsize=14)
+        if one_colorbar: break
+            
+    for num, ax_ in enumerate(axes):
+        plotting_functions.add_figure_label(ax_, f'{chr(97+num)})')
         
     return fig, axes, plots
 
 
-
-
 def plot_stable_year_all_models(ds, fig=None, ax=None, linestyle='dashed', exp_type=None, add_legend=True, 
-                               legend_loc='right', ncol=1, bbox_to_anchor=None, font_scale=1):
+                               legend_loc='right', ncol=1, bbox_to_anchor=None, font_scale=1, labelpad=60,
+                               xlabel='Year of Stabilisation', xlabelpad=20):
     ''''
     Plotting the year of stabilisation at each window for different models
     '''
     plt.style.use('seaborn-darkgrid')
     if not fig: fig = plt.figure(figsize=(10, 8))
     if not ax: ax = fig.add_subplot(111)
-    
-    if exp_type in MODEL_PROFILES:
+    if exp_type:
         information_profile = MODEL_PROFILES[exp_type]
-        models = np.intersect1d(ds.model.values, list(information_profile))
+        models = [model for model in list(information_profile) if model in ds.model.values]
+    # if exp_type in MODEL_PROFILES:
+    #     information_profile = MODEL_PROFILES[exp_type]
+    #     models = np.intersect1d(ds.model.values, list(information_profile))
     else:
         colors = constants.RANDOM_COLOR_LIST
         models = ds.model.values
@@ -614,8 +685,8 @@ def plot_stable_year_all_models(ds, fig=None, ax=None, linestyle='dashed', exp_t
                         fontsize=constants.PlotConfig.legend_text_size*font_scale)
         leg.set_title('Model')
         leg.get_title().set_fontsize(constants.PlotConfig.legend_title_size*font_scale)
-    plotting_functions.format_axis(ax, xlabel='Year of Stabilisation', ylabel='Window Length\n(Years)',
-                                   font_scale=font_scale, labelpad=76)
+    plotting_functions.format_axis(ax, xlabel=xlabel, ylabel='Window Length\n(Years)',
+                                   font_scale=font_scale, xlabelpad=xlabelpad, labelpad=labelpad)
     ax.set_title('')
     
     return fig, ax

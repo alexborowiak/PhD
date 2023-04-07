@@ -1,7 +1,9 @@
-.gif
-.nc
+*.gif
+*.nc
 .txt
+*.ipynb_checkpoints
+*.pyc
 .ipynb_checkpoints
 .pyc
-.pyc
-__pycache__/
+__pycache__
+*__pycache__

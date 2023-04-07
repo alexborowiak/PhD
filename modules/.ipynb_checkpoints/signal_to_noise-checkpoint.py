@@ -147,6 +147,9 @@ def generate_windows(windows:Tuple[int]=None, start_window:int=None, end_window:
 
 
 def __check_concat(to_concat):
+    '''
+    Checks if ano obejct should be concatentated or not.S
+    '''
     if len(to_concat) > 1: # We have ran more than one window
         print('\nConcatenating objects - PLEASE be patient!')
         return xr.concat(to_concat, dim='window').sortby('window')
@@ -411,89 +414,28 @@ def multiwindow_signal_to_nosie_and_bounds(
     return sn_multiwindow_ds.squeeze()
 
 
-def number_finite(da: xr.DataArray, dim:str='model') -> xr.DataArray:
+
+def stability_levels(ds:xr.Dataset) -> xr.DataArray:
     '''
-    Gets the number of points that are finite .
-    The function gets all points that are finite across the dim 'dim'.
+    Dataset needs to have the data_vars: 'signal_to_noise', 'upper_bound', 'lower_bounds'
+    Divides the datset into inncreasing unstable, decreasing unstable, and stable.
     
-    Paramaters
-    ----------
-    da: xr.Dataset or xr.DataArray (ds will be converted to da). This is the dataset 
-        that the number of finite points across dim.
-    number_present: xr.DataArray - the max number of available observations at each timestep
-    dim: str - the dimension to sum finite points across
-    
-    Returns
-    ------
-    da: xr.DataArray - the fraction of finite points.
+    These can then be counted to view the number of unstable and stable models at
+    any point.
     
     '''
-    
-    # If da is a dataset, we are going to convert to a data array.
-    if isinstance(da, xr.Dataset):
-        da = da.to_array(dim=dim)
-    
-    # The points that are finite become1 , else 0
-    finite_da = xr.where(np.isfinite(da), 1, 0)
-    
-    # Summing the number of finite points.
-    number_da = finite_da.sum(dim)
+    decreasing_unstable_da = ds.where(ds.signal_to_noise < ds.lower_bound).signal_to_noise
+    increasing_unstable_da = ds.where(ds.signal_to_noise > ds.upper_bound).signal_to_noise
     
     
-    return number_da
+    stable_da = ds.utils.between('signal_to_noise',
+                                 less_than_var='upper_bound', greater_than_var='lower_bound').signal_to_noise
+    unstable_da = ds.utils.above_or_below(
+        'signal_to_noise', greater_than_var='upper_bound', less_than_var='lower_bound').signal_to_noise
+    
+    return xr.concat([decreasing_unstable_da, increasing_unstable_da, unstable_da, stable_da], 
+                     pd.Index(['decreasing', 'increasing', 'unstable', 'stable'], name='stability'))
 
-
-def get_fracion_stable_ds(sn_multi_ds: xr.DataArray):
-    '''
-    Gets the number of models that are both stable and unstable at each time point.
-    Dataset must have dimension model, and must contain variables:
-    signal_to_noise, upper_bound, lower_bound.
-    '''
-    stable_sn_ds = sn_multi_ds.utils.between(
-        'signal_to_noise', less_than_var = 'upper_bound', greater_than_var = 'lower_bound')
-    
-    unstable_sn_ds = sn_multi_ds.utils.above_or_below(
-            'signal_to_noise', greater_than_var = 'upper_bound', less_than_var = 'lower_bound')
-
-    
-    stable_number_da = number_finite(stable_sn_ds.signal_to_noise)
-    unstable_number_da = number_finite(unstable_sn_ds.signal_to_noise)
-    stable_number_da.name = 'stable'
-    unstable_number_da.name = 'unstable'
-    
-    return xr.merge([stable_number_da, unstable_number_da])
-
-
-
-def count_over_data_vars(ds: xr.Dataset, data_vars: list = None, dim='model') -> xr.DataArray:
-    '''
-    Counts the number of data vars that are present. 
-    
-    Parameters
-    ----------
-    ds (xr.Dataset): the dataset to count over
-    data_vars (list): the data vars that need to be coutned.
-    dim (str): the dimenesion to be counted over
-    
-    Returns
-    -------
-    number_da (xr.Dataarray): the number of occurences accross the data vars
-    
-    '''
-    
-    # If data_vars is none then we want all the data vars from out dataset
-    if data_vars is None:
-        data_vars = ds.data_vars
-    
-    # Subsetting the desired data vars and then counting along a dimenstion. 
-    da = ds[data_vars].to_array(dim=dim) 
-    # This is the nubmer of models peresent at each timestep.
-    number_da = da.count(dim=dim)
-    # In the multi-window function, time has been changed to time.year, so must be done here as well
-    # Note: This may be removed in future.
-    number_da['time'] = ds.time.dt.year
-    number_da.name = f'number_of_{dim}'
-    return number_da
 
 
 def percent_of_non_nan_points_in_period(ds: xr.Dataset, period_list: List[tuple], logginglevel='ERROR') ->  xr.Dataset:
@@ -641,10 +583,10 @@ def get_dataarray_stable_year_multi_window(da:xr.DataArray, max_effective_length
     if max_effective_length is None:
         max_effective_length = len(da.time.values)
     
-    print(f'Replacing points greater than {max_effective_length} with {max_effective_length+1}')
+    print(f'Replacing points greater than {max_effective_length} with {max_effective_length}')
     concat_da = xr.where(
         concat_da > max_effective_length,
-        max_effective_length+1, concat_da)
+        max_effective_length, concat_da)
     
     # Bug can occur where all nan values become very negative. This just returns them to beign the max
     concat_da = xr.where(concat_da < 0, max_effective_length, concat_da).fillna(max_effective_length)
@@ -665,7 +607,7 @@ def get_dataset_stable_year_multi_window(ds:xr.Dataset, max_effective_length:int
                      .to_array(dim='variable')
                      .to_dataset(name='time'))
 
-def get_stable_year_ds(sn_multi_ds):
+def get_stable_year_ds(sn_multi_ds, max_effective_length:int=None):
     '''
     Gets the year in which the time series first becomes styable
     '''
@@ -673,7 +615,94 @@ def get_stable_year_ds(sn_multi_ds):
     unstable_sn_ds = sn_multi_ds.utils.above_or_below(
             'signal_to_noise', greater_than_var = 'upper_bound', less_than_var = 'lower_bound')
 
-    stable_point_ds = get_dataset_stable_year_multi_window(unstable_sn_ds)
+    stable_point_ds = get_dataset_stable_year_multi_window(unstable_sn_ds, max_effective_length=max_effective_length)
     return stable_point_ds
 
 
+
+
+# def number_finite(da: xr.DataArray, dim:str='model') -> xr.DataArray:
+#     '''
+    
+#     !!!! I don't know why you need this. This is just COUNT.
+#     Gets the number of points that are finite .
+#     The function gets all points that are finite across the dim 'dim'.
+    
+#     Paramaters
+#     ----------
+#     da: xr.Dataset or xr.DataArray (ds will be converted to da). This is the dataset 
+#         that the number of finite points across dim.
+#     number_present: xr.DataArray - the max number of available observations at each timestep
+#     dim: str - the dimension to sum finite points across
+    
+#     Returns
+#     ------
+#     da: xr.DataArray - the fraction of finite points.
+    
+#     '''
+    
+#     # If da is a dataset, we are going to convert to a data array.
+#     if isinstance(da, xr.Dataset):
+#         da = da.to_array(dim=dim)
+    
+#     # The points that are finite become1 , else 0
+#     finite_da = xr.where(np.isfinite(da), 1, 0)
+    
+#     # Summing the number of finite points.
+#     number_da = finite_da.sum(dim)
+    
+    
+#     return number_da
+
+
+# def get_fraction_stable_ds(sn_multi_ds: xr.DataArray, ) -> xr.Dataset:
+#     '''
+#     Gets the number of models that are both stable and unstable at each time point.
+#     Dataset must have dimension model, and must contain variables:
+#     signal_to_noise, upper_bound, lower_bound.
+#     '''
+#     stable_sn_ds = sn_multi_ds.utils.between(
+#         'signal_to_noise', less_than_var = 'upper_bound', greater_than_var = 'lower_bound')
+    
+#     unstable_sn_ds = sn_multi_ds.utils.above_or_below(
+#             'signal_to_noise', greater_than_var = 'upper_bound', less_than_var = 'lower_bound')
+
+    
+#     stable_number_da = number_finite(stable_sn_ds.signal_to_noise)
+#     unstable_number_da = number_finite(unstable_sn_ds.signal_to_noise)
+#     stable_number_da.name = 'stable'
+#     unstable_number_da.name = 'unstable'
+    
+#     return xr.merge([stable_number_da, unstable_number_da])
+
+
+
+# def count_over_data_vars(ds: xr.Dataset, data_vars: list = None, dim='model') -> xr.DataArray:
+#     '''
+#     Counts the number of data vars that are present. 
+    
+#     Parameters
+#     ----------
+#     ds (xr.Dataset): the dataset to count over
+#     data_vars (list): the data vars that need to be coutned.
+#     dim (str): the dimenesion to be counted over
+    
+#     Returns
+#     -------
+#     number_da (xr.Dataarray): the number of occurences accross the data vars
+    
+#     '''
+    
+#     # If data_vars is none then we want all the data vars from out dataset
+#     if data_vars is None:
+#         data_vars = ds.data_vars
+    
+#     # Subsetting the desired data vars and then counting along a dimenstion. 
+#     da = ds[data_vars].to_array(dim=dim) 
+#     # This is the nubmer of models peresent at each timestep.
+#     number_da = da.count(dim=dim)
+#     # In the multi-window function, time has been changed to time.year, so must be done here as well
+#     # Note: This may be removed in future.
+#     number_da['time'] = ds.time.dt.year
+#     number_da.name = f'number_of_{dim}'
+#     return number_da
