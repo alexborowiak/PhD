@@ -19,7 +19,7 @@ MODULE_DIR = '/home/563/ab2313/Documents/PhD/modules'
 
 
 class PlotConfig(NamedTuple):
-    title_size = 18
+    title_size = 20
     label_size = 16
     cmap_title_size = 16
     legend_title_size = 16
@@ -80,16 +80,28 @@ ZECMIP_MODELS = ['CESM2',
                  'UKESM1-0-LL']
 
 
+
 ZECMIP_MODEL_PARAMS = {
-     'NorESM2-LM':     {'ECS': 2.54, 'color': '#94FB33'},
-     'MIROC-ES2L':     {'ECS': 2.7,  'color': '#A0E24C'},
-     'MPI-ESM1-2-LR':  {'ECS': 2.83, 'color': '#ACC865'},
-     'GISS-E2-1-G-CC': {'ECS': 2.9,  'color': '#B8AF7E'}, # ECS value needs revision
-     'GFDL-ESM4':      {'ECS': 3.1,  'color': '#C49597'},
-     'CESM2':          {'ECS': 5.1,  'color': '#D07CB0'},
-     'UKESM1-0-LL':    {'ECS': 5.4,  'color': '#DC62C9'},
-     'CanESM5':        {'ECS': 5.7,  'color': '#F42FFB'},
- }
+     'NorESM2-LM':     {'ECS': 2.54, 'color': '#94FB33', 'linestyle': 'solid'},
+     'MIROC-ES2L':     {'ECS': 2.7,  'color': '#A0E24C', 'linestyle': 'dashed'},
+     'MPI-ESM1-2-LR':  {'ECS': 2.83, 'color': '#ACC865', 'linestyle': 'dashdot'},
+     'GISS-E2-1-G-CC': {'ECS': 2.9,  'color': '#B8AF7E', 'linestyle': 'dotted'}, # ECS value needs revision
+     'GFDL-ESM4':      {'ECS': 3.1,  'color': '#C49597', 'linestyle': (0, (3, 1, 1, 1))},
+     'CESM2':          {'ECS': 5.1,  'color': '#D07CB0', 'linestyle': (0, (3, 1, 1, 1, 1, 1))},
+     'UKESM1-0-LL':    {'ECS': 5.4,  'color': '#DC62C9', 'linestyle': (0, (1, 1))},
+     'CanESM5':        {'ECS': 5.7,  'color': '#F42FFB', 'linestyle': (0, (1, 3))},
+}
+
+# ZECMIP_MODEL_PARAMS = {
+#      'NorESM2-LM':     {'ECS': 2.54, 'color': '#94FB33'},
+#      'MIROC-ES2L':     {'ECS': 2.7,  'color': '#A0E24C'},
+#      'MPI-ESM1-2-LR':  {'ECS': 2.83, 'color': '#ACC865'},
+#      'GISS-E2-1-G-CC': {'ECS': 2.9,  'color': '#B8AF7E'}, # ECS value needs revision
+#      'GFDL-ESM4':      {'ECS': 3.1,  'color': '#C49597'},
+#      'CESM2':          {'ECS': 5.1,  'color': '#D07CB0'},
+#      'UKESM1-0-LL':    {'ECS': 5.4,  'color': '#DC62C9'},
+#      'CanESM5':        {'ECS': 5.7,  'color': '#F42FFB'},
+#  }
 
 LONGRUNMIP_MODEL_PARAMS = {
     'gisse2r':  {'ECS' : 2.44, 'color': '#94FB33'},
@@ -134,9 +146,9 @@ ZECMIP_MULTI_WINDOW_RUN_PARAMS = dict(start_window = 11, end_window = 51, step_w
 
 # Windows that have interesing properties. These windows were decided upong from
 # the graphs of the year when models and variables stabailise in the global mean.
-WINDOWS_OF_INTEREST = [21, 81, 151]
-LONGRUNMIP_WINDOWS = [21, 41, 81]
-ZECMIP_WINDOWS = [21, 41]
+WINDOWS_OF_INTEREST = (21, 81, 151)
+LONGRUNMIP_WINDOWS = (21, 41, 81)
+ZECMIP_WINDOWS = (21, 41)
 LONGRUNMIP_LENGTH = 800 # The length of the longrunmip simulations to use
 # Need to make sure all the windows have a full length
 LONGRUNMIP_EFFECTIVE_LENGTH = LONGRUNMIP_LENGTH - WINDOWS_OF_INTEREST[-1]

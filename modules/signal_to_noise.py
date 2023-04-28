@@ -38,7 +38,7 @@ def calculate_ice_earth_fraction(ds: xr.Dataset) -> xr.Dataset:
     return global_frac_ds
 
 
-def calculate_global_value(ds: xr.DataArray, control_ds: xr.DataArray, variable:str, lat_bounds:tuple=None,
+def calculate_global_value_and_anomly(ds: xr.DataArray, control_ds: xr.DataArray, variable:str, lat_bounds:tuple=None,
                           experiment_params=None):
     '''Calculates anomalies and mean.'''
 
@@ -61,7 +61,21 @@ def calculate_global_value(ds: xr.DataArray, control_ds: xr.DataArray, variable:
         control_mean = control_ds.clima.space_mean()
         ds_mean = ds_anom.clima.space_mean() 
     
-    return ds_mean.compute(), control_mean.compute()\
+    return ds_mean.compute(), control_mean.compute()
+
+def calculate_global_value(ds: xr.DataArray, variable:str, lat_bounds:tuple=None, experiment_params=None):
+    '''Calculates anomalies and mean.'''
+
+    if not lat_bounds and not experiment_params: lat_bounds = (None,None)
+    if isinstance(experiment_params, dict): lat_bounds = constants.HEMISPHERE_LAT[experiment_params['hemisphere']]
+    print(lat_bounds)
+    
+    ds = ds.sel(lat=slice(*lat_bounds))
+    if variable == 'sic': ds_mean = calculate_ice_earth_fraction(ds)
+    else: ds_mean = ds.clima.space_mean() 
+    
+    return ds_mean.persist()
+
 
 def dask_percentile(array: np.ndarray, axis: str, q: float):
     '''
@@ -509,10 +523,8 @@ def get_stable_arg(values: np.ndarray, window: int) -> int:
     condition_groupby_stable_arg = [i for i,(key,length) in enumerate(condition_groupby) 
                            if not key and length > window]
     
-    if len(condition_groupby_stable_arg) > 0:
-        condition_groupby_stable_arg = condition_groupby_stable_arg[0]
-    else:
-        return np.nan
+    if len(condition_groupby_stable_arg) > 0: condition_groupby_stable_arg = condition_groupby_stable_arg[0]
+    else: return np.nan
         
     stable_arg = np.sum([length for key, length in condition_groupby[:condition_groupby_stable_arg]])
     
@@ -531,20 +543,13 @@ def helper_get_stable_arg(data: np.ndarray, axis: int, window: int) -> np.ndarra
 
 def get_stable_year(untsable_da: xr.DataArray, window:int, max_effective_length:int=None) -> xr.DataArray:
     
-    if 'window' in list(untsable_da.coords):
-        window = int(untsable_da.window.values)
-    else:
-        window = window
-    da_stable = untsable_da.reduce(helper_get_stable_arg, axis=untsable_da.get_axis_num('time'),
-                                     window=window)
+    if 'window' in list(untsable_da.coords): window = int(untsable_da.window.values)
+    else: window = window
+    da_stable = untsable_da.reduce(helper_get_stable_arg, axis=untsable_da.get_axis_num('time'), window=window)
     
+    if max_effective_length is None: max_effective_length = len(untsable_da.time.values)
 
-    
-    if max_effective_length is None:
-        max_effective_length = len(untsable_da.time.values)
-    
     print(f'Replacing points greater than {max_effective_length} with {max_effective_length+1}')
-    
     da_stable = xr.where(da_stable > max_effective_length, max_effective_length+1, da_stable)
     
     return da_stable
@@ -570,7 +575,6 @@ def get_dataarray_stable_year_multi_window(da:xr.DataArray, max_effective_length
     windows = da.window.values
     windows = np.atleast_1d(windows)
     
-  
     for window in windows:
         da_window = da.sel(window=window)
         da_stable = da_window.reduce(helper_get_stable_arg, axis=da_window.get_axis_num('time'),
@@ -580,13 +584,10 @@ def get_dataarray_stable_year_multi_window(da:xr.DataArray, max_effective_length
     concat_da = xr.concat(to_concat, dim='window')
     concat_da.name = 'time'
     
-    if max_effective_length is None:
-        max_effective_length = len(da.time.values)
+    if max_effective_length is None:max_effective_length = len(da.time.values)
     
     print(f'Replacing points greater than {max_effective_length} with {max_effective_length}')
-    concat_da = xr.where(
-        concat_da > max_effective_length,
-        max_effective_length, concat_da)
+    concat_da = xr.where(concat_da > max_effective_length, max_effective_length, concat_da)
     
     # Bug can occur where all nan values become very negative. This just returns them to beign the max
     concat_da = xr.where(concat_da < 0, max_effective_length, concat_da).fillna(max_effective_length)
@@ -620,6 +621,221 @@ def get_stable_year_ds(sn_multi_ds, max_effective_length:int=None):
 
 
 
+def get_stable_average_anomaly_lat_lon(arr1: ArrayLike, arr2:ArrayLike, window:int)->ArrayLike:
+    '''
+    arr2 is an index of the array arr1. They should have the same dimensions, but arr1
+    will have an extra 0th dimension that is time. The index values in arr2 must be at 
+    most the length of arr1's 0th dimension - window.
+    
+    Note: This is not completely general. The array must have lat and lon coords for this 
+    to work. This cannot be completely general as a tuple cannot be unpacked into an index.
+    E.g. ix_ = (I, J, K); arr1[arr2+i, *ix_] returns an error
+    
+    Example
+    ------    
+    arr1 = ds1.values
+    arr2 = arg_ds.sel(window=21).squeeze().values.astype(int)
+    get_stable_average_anomaly(arr1, arr2, 21)
+    '''
+    H, I, J, K = np.indices((window, *arr2.shape), sparse=True)
+    out = arr1[H + arr2, I, J, K].mean(axis=0)
+    
+    return out
+
+
+def get_stable_average_anomaly_global(arr1: ArrayLike, arr2:ArrayLike, window:int)->ArrayLike:
+    '''
+    arr2 is an index of the array arr1. They should have the same dimensions, but arr1
+    will have an extra 0th dimension that is time. The index values in arr2 must be at 
+    most the length of arr1's 0th dimension - window.
+    
+    Note: This is not completely general. The array must have lat and lon coords for this 
+    to work. This cannot be completely general as a tuple cannot be unpacked into an index.
+    E.g. ix_ = (I, J, K); arr1[arr2+i, *ix_] returns an error
+    
+    Example
+    ------    
+    arr1 = ds1.values
+    arr2 = arg_ds.sel(window=21).squeeze().values.astype(int)
+    get_stable_average_anomaly(arr1, arr2, 21)
+    '''
+    H, I = np.indices((window, *arr2.shape), sparse=True)
+    out = arr1[H + arr2, I].mean(axis=0)
+    
+    return out
+
+def get_stabel_average_anomaly_over_windows(ds1:xr.DataArray, arg_ds:xr.DataArray, 
+                                           local=True) -> xr.DataArray:
+    '''
+    Loops over all window values and applies the get_stable_average_anomaly_lat_lon function.
+    Then results are returned as xarray data array. 
+    See get_stable_average_anomaly_lat_lon for details on how this function works.
+    '''
+    stable_anom_func = get_stable_average_anomaly_lat_lon if local else get_stable_average_anomaly_global
+    print(stable_anom_func)
+    arr1 = ds1.values
+    
+    mean_anom_array = []
+    for window in arg_ds.window.values:
+        arr2 = arg_ds.sel(window=window).squeeze().values.astype(int)
+        mean_anom_at_stable_array_2 = stable_anom_func(arr1, arr2, window)
+        mean_anom_array.append(mean_anom_at_stable_array_2)
+
+    stable_anom_da = xr.zeros_like(arg_ds.squeeze()).astype(float)
+    stable_anom_da.name = 'temp'
+    stable_anom_da += mean_anom_array
+    return stable_anom_da
+
+
+def remove_values_before_index(arr1, arr2):
+    '''
+    arr2 values are all index values for arr1. This will remove all the values in arr1 after the index in arr2. This is done to remove all 
+    the points after the model has become stabilised.
+    2D example
+    arr1 = [1,2,3,4,5,6]
+    arr2 = [2]
+    out = remove_values_before_index(arr1, arr2)
+    out
+    >>> [1,2,3, np.nan, np.nan, np.nan]
+    https://stackoverflow.com/questions/76022378/numpy-set-all-values-to-np-nan-after-index-in-multi-dimensional-array/76022589#76022589
+    '''
+    # These are the possible indices along the first axis in arr1
+    # Hence shape (100, 1, 1, 1):
+    idx = np.arange(arr1.shape[0])[:, None, None, None]
+    out = arr1.copy()
+    out[idx < arr2] = np.nan
+    return out
+
+def remove_all_unstable_points(ds:xr.DataArray, arr_ds:xr.DataArray) -> xr.DataArray:
+    '''
+    Applies the remove_values_before_index to all windows, and then puts the output back into an xarray data frame
+    '''
+
+    windows = ds.window.values
+    stor = []
+    for window in windows:
+        print(window)
+        arr1 = ds.sel(window=window).values
+        arr2 = arr_ds.sel(window=window).squeeze().values
+
+        out = remove_values_before_index(arr1, arr2)
+        stor.append(out)
+
+    stable_da = xr.zeros_like(ds) + stor
+    
+    return stable_da
+
+
+def find_stable_and_unstable_years_array(values_1d:List[float], window:int, number_attemps:int=4)-> List[List[int]]:
+    """
+    Finds the years when the time series data is stable and unstable.
+
+    Args:
+        values_1d (np.ndarray): One-dimensional array of time series data.
+        window (int): THe window length that this has been calculated over.
+        number_attemps (int): Max number of attempts.
+
+    Returns:
+        List[List[int]]: A list containing two lists. The first list contains the indices of the stable years,
+        and the second list contains the indices of the unstable years.
+    """
+    values_1d = np.array(values_1d)
+    values_1d[np.isfinite(values_1d)] = 1 # Set the finite values to 1
+    values_1d[~np.isfinite(values_1d)] = 0 # And non-finite values to 0
+    required_stable_perdiod = window/2
+    cumulative_length = 0
+    stable_args = []; unstable_args = []
+    searching_for_stable = True # We are assuming that the time series is initially unstalbe and we want to find when first unstable
+    value_checking_for = bool(not searching_for_stable) # The value we want to check for then is 0
+    for key, group in itertools.groupby(values_1d):
+        group = np.array(list(group)); group_length = len(group)    
+        if group_length > required_stable_perdiod and np.all(group==value_checking_for): # The period is stable/unstable
+            if searching_for_stable: stable_args.append(cumulative_length) # Assign to the correct array
+            elif not searching_for_stable: unstable_args.append(cumulative_length)
+            searching_for_stable = not searching_for_stable # Now we are searching for unstable
+            value_checking_for = bool(not searching_for_stable)
+        cumulative_length += len(group) # Update cumulate length at the end, as we want the first year becomes stable
+    
+    if len(stable_args) < number_attemps: stable_args = stable_args + [np.nan] * (number_attemps-len(stable_args))
+    if len(unstable_args) < number_attemps: unstable_args = unstable_args + [np.nan] * (number_attemps-len(unstable_args))
+
+    return [stable_args, unstable_args]
+
+
+def find_stable_and_unstable_years(input_da:xr.DataArray, number_attemps:int=4):
+    windows = input_da.window.values
+    
+    to_concat = []
+    for window in windows:
+        da = input_da.sel(window=window)
+        axis_num = da.get_axis_num('time')
+        stable_unstable_args = np.apply_along_axis(find_stable_and_unstable_years_array,
+                                                   axis=axis_num,
+                                                   arr=da.values,
+                                                   window=window,
+                                                   number_attemps=number_attemps)
+        
+        dims = np.array(list(da.dims))
+        dims = dims[dims != 'time']
+        dims = np.concatenate([['stability', 'arg'], dims])
+        coords = dict(da.coords)
+        coords['arg'] = np.arange(number_attemps)
+        coords['stability'] = ['stable', 'unstable']
+        del coords['time'] 
+        
+        stable_unstable_args_da = xr.DataArray(stable_unstable_args, dims=dims, coords=coords)
+        to_concat.append(stable_unstable_args_da)
+    to_return = xr.concat(to_concat, dim='window')
+    to_return.name = 'time'
+    return to_return
+
+
+def remove_unstable_years_advanced(ds:xr.DataArray, arr_ds:xr.DataArray) -> xr.DataArray:
+    """
+    Removes years from `ds` based on stability information in `arr_ds`.
+
+    Parameters:
+    -----------
+    ds : xr.DataArray
+        The data to filter based on stability information.
+    arr_ds : xr.DataArray
+        An array with stability information, where the 'stability' dimension
+        specifies whether a year is 'stable' or 'unstable', and the 'arg'
+        dimension specifies the order in which the stability changes occur.
+
+    Returns:
+    --------
+    xr.DataArray
+        The filtered data with unstable years set to NaN.
+
+    Notes:
+    ------
+    The function assumes that the `arr_ds` array contains three stability change
+    events: (1) the first transition from unstable to stable, (2) the second
+    transition from stable to unstable (which rarely happens), and (3) the
+    third transition from unstable to stable (which only happens if the data
+    destabilizes after the second transition). Years before the first transition
+    to stability are set to NaN, years between the first and second transitions
+    are set to 1, and years after the second transition to stability are set to NaN.
+    """
+    fill_value = 99999
+    
+    out = ds.values.copy()
+
+    idx = np.arange(out.shape[0])[:, None, None, None, None]
+    
+    first_stable_args = arr_ds.sel(stability='stable', arg=0) # Time when first stabilises
+    first_unstable_args = arr_ds.sel(stability='unstable', arg=0) # Time when this will unstabilise (rarely happens)
+    second_stable_args = arr_ds.sel(stability='stable', arg=1) # Only happends if detsabilises
+
+    out[idx < np.nan_to_num(first_stable_args, nan=fill_value)] = np.nan # Remove first unstalbe points - not to be counted
+    out[np.logical_and(
+        idx < np.nan_to_num(first_unstable_args, nan=fill_value), # If re-stabilises, these are to be counted.
+        idx > np.nan_to_num(second_stable_args, nan=fill_value)
+                      )] = 1
+    out[idx > np.nan_to_num(second_stable_args, nan=fill_value)] = np.nan # Has destabilised - not to be counted.
+
+    return (xr.zeros_like(ds) + out)
 
 # def number_finite(da: xr.DataArray, dim:str='model') -> xr.DataArray:
 #     '''

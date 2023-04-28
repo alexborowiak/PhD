@@ -33,3 +33,10 @@ class LocationsLatLon(Enum):
     JAKARTA = (-6.2088, 106.84)
     CENTRAL_PACIFIC = (0, -140)
     SOUTHERN_OCEAN = (-45, 60)
+    
+    
+class locationsLatLon2(Enum):
+    SOLOMON_ISLANDS = (-6.215, 158.164)
+    EASTERN_PACIFIC = (-19.569, -85.411)
+    ARCTIC = (77.0169, 119.781)
+    ANTARCTIC = (-63.671, 89.899)

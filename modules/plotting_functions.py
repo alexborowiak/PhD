@@ -23,7 +23,7 @@ def add_figure_label(ax: plt.Axes, label:str, font_scale:int=1):
 def format_axis(ax: plt.Axes, title:str=None, xlabel:str=None, ylabel:str=None, invisible_spines=None, 
                font_scale=1, rotation=0, labelpad=100, xlabelpad=10):
     '''Formatting with no top and right axis spines and correct tick size.'''
-    if xlabel: ax.set_xlabel(xlabel, rotation=rotation, fontsize=PlotConfig.label_size*font_scale, ha='center', va='center',
+    if xlabel: ax.set_xlabel(xlabel, fontsize=PlotConfig.label_size*font_scale, ha='center', va='center',
                             labelpad=xlabelpad)
     if ylabel: ax.set_ylabel(ylabel, rotation=rotation, labelpad=labelpad*font_scale,
                              fontsize=PlotConfig.label_size*font_scale, ha='center', va='center')
