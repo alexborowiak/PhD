@@ -1,17 +1,21 @@
 import numpy as np
 import xarray as xr
 import pandas as pd
+
 import matplotlib.pyplot as plt
 import matplotlib as mpl
 import cartopy.crs as ccrs
-from typing import Union
 from matplotlib import ticker as mticker
 import matplotlib.gridspec as gridspec
+from matplotlib.patches import Rectangle
+import matplotlib.colors as mcolors
 from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
-from typing import Dict, List
-import exceptions
-# from constants import MODEL_PARAMS
+
 from pprint import pprint, pformat
+from typing import Dict, List, Union, Optional, Callable, Tuple
+from numpy.typing import ArrayLike
+
+import exceptions
 import sys,logging
 import utils
 logging.basicConfig(format="%(message)s", filemode='w', stream = sys.stdout)
@@ -19,13 +23,13 @@ logger = logging.getLogger()
 sys.path.append('../')
 import constants
 import plotting_functions
-from matplotlib.patches import Rectangle
-from numpy.typing import ArrayLike
 
+
+
+ArrayLike = List[float]
 # Usually use a red cmap, so making sure the lines are not red.
 NO_RED_COLORS = ('k', 'green','yellow', 'mediumpurple', 'black',
                  'lightgreen','lightblue', 'greenyellow')
-
 MODEL_PROFILES = {'longrunmip': constants.LONGRUNMIP_MODEL_PARAMS, 'zecmip': constants.ZECMIP_MODEL_PARAMS}
 
 # experiment_colors = {'tas_global': 'red', 'tas_land_global': 'lightcoral',
@@ -38,6 +42,10 @@ experiment_colors = {'tas_global': 'red', 'tas_land_global': 'lightcoral',
                      'tos_sea_global': 'blue'}
 
 
+
+
+colors = [(1, 1, 1, 0), (0, 0, 0, 1)]  # RGBA format: (red, green, blue, alpha)
+black_white_cmap = mcolors.ListedColormap(colors)
 
 def format_plot(fig, ax):
     '''
@@ -54,6 +62,25 @@ def format_plot(fig, ax):
     gl.top_labels = False
 
 
+# def format_colorbar(pcolor, gs=None, cax:plt.Axes=None, tick_symbol:str='%'):
+#     '''
+#     Creates a colorbar that takes up all columns in the 0th row.
+#     The tick labels are percent
+    
+#     Reason
+#     ------
+#     In 07_exploring_consecutive_metrics_all_models_(nb_none) a colorbar 
+#     of this type is used repeatedly. 
+#     '''
+#     cax = plt.subplot(gs[0,:]) if not cax else cax
+
+#     cbar = plt.colorbar(pcolor, cax=cax, orientation='horizontal')
+#     xticks = cbar.ax.get_xticks()
+#     cbar.ax.set_xticks(xticks)
+#     if tick_sybmol: cbar.ax.set_xticklabels([str(int(xt)) + tick_symbol for xt in xticks]);
+#     cbar.ax.tick_params(labelsize=labelsize)
+    
+#     return cbar
 
 def highlight_plot(ax, ds, ds_highlight=None, legend_on:bool =True, yaxis_right:bool=False, label=None,
                   color='tomato', highlight_color='darkred', bbox_to_anchor = [-0.03, 1]):
@@ -101,7 +128,7 @@ def two_line_highlight_plot(left_ds:xr.DataArray=None,
                             right_highlight_ds:xr.DataArray=None, 
                             left_label = None, right_label=None,
                             bounds:Dict[str, float] = None):
-    plt.style.use('seaborn-darkgrid')
+    ##plt.style.use('seaborn-darkgrid')
 
     fig = plt.figure(figsize=  (15,10))
     ax1 = fig.add_subplot(111)
@@ -114,7 +141,8 @@ def two_line_highlight_plot(left_ds:xr.DataArray=None,
         ax2 = ax1.twinx()
         highlight_plot(ax2, right_ds, ds_highlight = right_highlight_ds,
                        yaxis_right=True, label=right_label)
-    else: ax2=None
+    else:
+        ax2=None
         
     if isinstance(bounds, dict):
         for key, value in bounds.items():
@@ -122,6 +150,7 @@ def two_line_highlight_plot(left_ds:xr.DataArray=None,
                    color='tomato', linestyle=':', alpha=0.8)
         
     return fig, ax1, ax2
+
 
 
 
@@ -133,7 +162,7 @@ def temperature_vs_sn_plot(ax,
                           bounds:Dict[str, float] = None):
     print('!!!!!!! Warning: This is a legacy function and is no longer supported.')
     print('Please use two_line_highlight_plot is sn_plotting')
-    plt.style.use('seaborn-darkgrid')
+    ##plt.style.use('seaborn-darkgrid')
 
     if isinstance(sn, xr.DataArray):
         highlight_plot(ax, sn, ds_highlight = sn_highlight,
@@ -183,8 +212,8 @@ def plot_all_coord_lines(da: xr.DataArray, coord='model', exp_type=None,
     for i, coord_value in enumerate(coord_values):
         logger.debug(f'{i} {coord_value}, ')
        
-        if exp_type: kwags_to_use = dict(c = MODEL_PARAMS[coord_value]['color'])
-        else: kwags_to_use = dict(c = NO_RED_COLORS[i])
+        if exp_type: c = MODEL_PARAMS[coord_value]['color']
+        else: c = NO_RED_COLORS[i]
 
         label=coord_value
         if exp_type:
@@ -195,12 +224,11 @@ def plot_all_coord_lines(da: xr.DataArray, coord='model', exp_type=None,
     
         ax.plot(time, da_to_plot,
                 alpha=kwargs['line_alpha'] if 'line_alpha' in kwargs else 1,
-                zorder=1000, label=label, linewidth=3, **kwags_to_use)
-        
-         
+                zorder=1000, label=label, linewidth=2,  
+                c=c)
     if consensus and len(coord_values) > 1: ax.plot(time, da.mean(dim=coord).values,
                 alpha=kwargs['line_alpha'] if 'line_alpha' in kwargs else 1,
-                zorder=1000, label='Mean', linewidth=3,  
+                zorder=1000, label='Mean', linewidth=2,  
                 c='black')
     
     if isinstance(xlim, tuple): ax.set_xlim(da.time.values[xlim[0]], da.time.values[xlim[-1]])
@@ -211,7 +239,10 @@ def plot_all_coord_lines(da: xr.DataArray, coord='model', exp_type=None,
         leg.set_title(coord.capitalize())
         leg.get_title().set_fontsize(constants.PlotConfig.legend_title_size*font_scale)
         
-    plotting_functions.format_axis(ax, xlabel=xlabel, ylabel=ylabel, title=title, labelpad=labelpad)
+    plotting_functions.format_axis(ax, xlabel=xlabel, ylabel=ylabel, title=title, labelpad=labelpad,
+                                               # invisible_spines=['top', 'right']
+                                   font_scale=font_scale)
+                       
     return fig, ax
 
 
@@ -235,7 +266,8 @@ def create_colorbar(plot, cax, levels, ticks='', cbar_title='',
     
     cbar = plt.colorbar(plot, cax=cax, orientation=orientation, extend=extend, shrink=shrink)
     
-    tick_locations = levels; tick_labels = levels
+    tick_locations = levels
+    tick_labels = levels
     if tick_offset == 'center':
         tick_locations = levels[:-1] + np.diff(levels)/2
         tick_labels = tick_labels[:-1]
@@ -346,13 +378,14 @@ def sn_multi_window_in_time(da:xr.DataArray, exp_type:str=None,
                             tick_offset=None, cut_ticks=1, patch=False, hspace=0,
                             title:str=None, axes_title:str=None,rotation=0,
                             ylabel='Window Length\n(Years)', xlabel='Time (Years)',
-                            ax2_ylabel = 'Anomaly', add_legend=True, labelpad=100, 
+                            ax2_ylabel = 'Anomaly', add_legend=True, labelpad_left=100, labelpad_right=50,
                             bbox_to_anchor=(1, 1.3), stable_year_kwargs=dict(),
                             logginglevel='ERROR', return_all=True):
     '''
     
     '''
-    mpl.rcParams.update(mpl.rcParamsDefault)
+    # mpl.rcParams.update(mpl.rcParamsDefault)
+    plt.style.use('default')
     utils.change_logging_level(logginglevel)    
     
      
@@ -373,7 +406,7 @@ def sn_multi_window_in_time(da:xr.DataArray, exp_type:str=None,
                  cbar_tile=cbar_tile, tick_labels=tick_labels, add_colorbar=add_colorbar, cbar_label=cbar_label,
                  tick_offset=tick_offset, cut_ticks=cut_ticks, patch=patch, hspace=hspace,
                  title=title, axes_title=axes_title, rotatiogn=rotation,
-                 ylabel=ylabel, xlabel=xlabel, labelpad=labelpad)
+                 ylabel=ylabel, xlabel=xlabel, labelpad=labelpad_left)
 
     # ---> Temperature Anomaly
     if isinstance(temp_da, xr.DataArray):
@@ -383,11 +416,13 @@ def sn_multi_window_in_time(da:xr.DataArray, exp_type:str=None,
         plot_all_coord_lines(da=temp_da, ax=ax2, fig=fig, exp_type=exp_type, add_legend=add_legend,
                              font_scale=font_scale, bbox_to_anchor=bbox_to_anchor)
         plotting_functions.format_axis(ax2, xlabel=xlabel, ylabel=ax2_ylabel,
-                                       font_scale=font_scale, labelpad=labelpad, rotation=rotation)
+                                       font_scale=font_scale, labelpad=labelpad_right, rotation=rotation)
         ax2.set_title(None)
-
     if return_all:
-        return (fig, [ax, ax2, cax])
+        try:
+            return (fig, [ax, ax2, cax])
+        except NameError:
+            return (fig, [ax, cax])
 
 
 def plot_all_period_maps(ds, periods, suptitle = 'Percent of Years That are Stable', cmap = 'RdBu', col_increase = 1,
@@ -439,7 +474,7 @@ def plot_year_of_stability(ds: xr.Dataset, varible_to_loop: str, title:str=None)
     
     '''
     
-    plt.style.use('seaborn-darkgrid')
+    ##plt.style.use('seaborn-darkgrid')
     fig = plt.figure(figsize=(10, 8))
     ax = fig.add_subplot(111)
 
@@ -554,7 +589,18 @@ def __create_plot_dict(ds:xr.DataArray, dim:str, percentile:float=99, vmin=None,
     return plot_dict
 
 
-def __make_up_coords(ds):
+def __make_up_coords(ds: xr.Dataset) -> Tuple[str, xr.Dataset]:
+    """
+    Adds a made-up coordinate to a dataset and returns the modified dataset along with the made-up coordinate name.
+    This is used in the `map_plot_all_for_coords` function when there is not column or row to loop through. One is
+    made up.
+
+    Args:
+        ds (xr.Dataset): The dataset to which the made-up coordinate will be added.
+
+    Returns:
+        Tuple[str, xr.Dataset]: A tuple containing the made-up coordinate name and the modified dataset.
+    """
     made_up_name = '_'
     ds =  ds.expand_dims(made_up_name).assign_coords(_=(made_up_name, ['_']))
     return '_', ds
@@ -620,16 +666,74 @@ def map_plot_all_for_coords(ds:xr.DataArray, variable:int, column_coord:str=None
 
 
 
-def map_plot_all_for_coords_2(da:xr.DataArray, dim:str, levels:ArrayLike, ncols=3,
-                              fig=None, axes:plt.Axes=None, gs=None,cax=None, add_colorbar=True,
-                              projection=ccrs.Robinson, cmap='RdBu_r', extend='both', font_scale=1.4,
-                              cbar_title=None, return_all=True, add_label=True, debug=False):
+def plot_stippled_data(da, ax, stiple_reduction:bool=True, sig_size=2.5, alpha:float=1):
+    """
+    Plots stippled data on a given axis.
+
+    Args:
+        da (xr.DataArray): The data array containing the values to plot.
+        ax (plt.Axes): The matplotlib axis object to plot on.
+        stiple_reduction (bool): Thin the stippling amount by 1/4.
+        sig_size (float): The size of the stipples (default: 2.5).
+        alpha (float): The transparency of the stipples (default: 1). Values between 0 and 1
+
+    Returns:
+        None
+    """
+
+    # The result will be scattered, so we need a meshgrid.
+    X,Y = np.meshgrid(da.lon, da.lat)
+
+    #Non-nan values (finite values) are getting replaced by 1. 
+    sig = da.where(~np.isfinite(da), 1)
+
+    # All the values that are nan will be replaced with 0. 
+    size = np.nan_to_num(sig.values, 0)
+
+    if stiple_reduction:
+        size[::2] = 0; size = np.transpose(size)
+        size[::2] = 0; size = np.transpose(size)
+    ax.scatter(X,Y, s = size*sig_size, color='grey', alpha=alpha, transform=ccrs.PlateCarree())
+
+
+def map_plot_all_for_coords_2(da: xr.DataArray, dim: str, levels: ArrayLike, ncols: int = 3,
+                              fig: Optional[plt.Figure] = None, axes: Optional[List[plt.Axes]] = None,
+                              gs: Optional[gridspec.GridSpec] = None, cax: Optional[plt.Axes] = None,
+                              add_colorbar: bool = True, projection: Callable = ccrs.Robinson,
+                              cmap: str = 'RdBu_r', extend: str = 'both', font_scale: float = 1.4,
+                              cbar_title: Optional[str] = None, return_all: bool = True, add_label: bool = True,
+                              debug: bool = False, max_stabilisation_year: Optional[int] = None,
+                              stabilisation_method: Optional[str] = None,
+                              stipling_da: Optional[xr.DataArray] = None) -> Optional[Tuple[plt.Figure, List[plt.Axes], plt.Axes]]:
     '''
-    Plots rows x colums of the data for the dim coordinate. This can take any projeciton and
-    also can take new figure or generate a figure.
-    
-    seperate_cbar: bool
-        A seperate cbar per columns. Only valid currenty for a single row
+    Plots rows x columns of the data for the dim coordinate. This can take any projection and
+    can also take a new figure or generate a figure.
+
+    Parameters:
+        da (xr.DataArray): The data array to plot.
+        dim (str): The dimension along which to plot the data.
+        levels (ArrayLike): The contour levels to use for plotting.
+        ncols (int): Number of columns for the plot grid (default: 3).
+        fig (plt.Figure, optional): The matplotlib figure object to use for the plot (default: None).
+        axes (List[plt.Axes], optional): List of matplotlib axes objects to use for the subplots (default: None).
+        gs (gridspec.GridSpec, optional): The gridspec object defining the layout of subplots (default: None).
+        cax (plt.Axes, optional): The axes object to use for the colorbar (default: None).
+        add_colorbar (bool): Whether to add a colorbar to the plot (default: True).
+        projection (callable): The projection to use for the plot (default: ccrs.Robinson).
+        cmap (str): The colormap to use for the plot (default: 'RdBu_r').
+        extend (str): The colorbar extension option (default: 'both').
+        font_scale (float): The scaling factor for the font sizes (default: 1.4).
+        cbar_title (str, optional): The title for the colorbar (default: None).
+        return_all (bool): Whether to return all created objects (default: True).
+        add_label (bool): Whether to add labels to the subplots (default: True).
+        debug (bool): Whether to print debug information (default: False).
+        max_stabilisation_year (int, optional): The maximum stabilization year (default: None).
+        stabilisation_method (str, optional): The method for stabilization (default: None).
+        stipling_da (xr.DataArray, optional): The data array for stippling (default: None).
+
+    Returns:
+        If `return_all` is True, the function returns the created figure, axes, and colorbar objects. Otherwise, None.
+
     '''
     
     projection = projection(central_longitude=int(np.mean(da.lon.values)))
@@ -645,69 +749,73 @@ def map_plot_all_for_coords_2(da:xr.DataArray, dim:str, levels:ArrayLike, ncols=
     # If levels[0] is not list or array it will be a int/float, then this is just one levels.
     matching_levels_for_all = isinstance(levels[0], (int, float, np.int64, np.float32, np.float64))
     for num,dv in enumerate(dim_vals):
+        ax = axes[num]
         levels_to_use = levels if matching_levels_for_all else levels[num]
         if debug: print(levels_to_use)
-        c = axes[num].contourf(da.lon.values, da.lat.values, da.loc[{dim:dv}].values,
+        da_to_use = da.loc[{dim:dv}]
+        c = ax.contourf(da.lon.values, da.lat.values, da_to_use.values,
                       transform=ccrs.PlateCarree(), cmap=cmap, levels=levels_to_use, extend=extend)
+        if max_stabilisation_year:
+            da_binary = xr.where(da_to_use > max_stabilisation_year, 1, 0)
+            if stabilisation_method == 'blackout':
+                ax.contourf(da_binary.lon.values, da_binary.lat.values, da_binary.values,
+                          transform=ccrs.PlateCarree(), cmap=black_white_cmap, levels=[0, 0.5,1], extend='neither')
+            elif stabilisation_method == 'stipple':
+                plot_stippled_data(da_binary, ax)
+            else: raise ValueError(f'stabilisation_method must be one of [blackout, stipple]. Value entered: {stabilisation_method}')
+        if isinstance(stipling_da, xr.DataArray):
+            stippling_data_to_use = stipling_da.loc[{dim:dv}]
+            plot_stippled_data(stippling_data_to_use, ax, sig_size=.7, stiple_reduction=1, alpha=0.8)
         axes[num].coastlines()
         axes[num].set_title(dv, fontsize=constants.PlotConfig.title_size*font_scale)
         if add_label: plotting_functions.add_figure_label(axes[num], f'{chr(97+num)})', font_scale=font_scale)
         if add_colorbar and not colobar_completed:
             gs_to_use = gs[nrows, :] if matching_levels_for_all else gs[nrows, num] # One cax, or multiple
             print(gs_to_use)
-            cax_to_use = plt.subplot(gs_to_use)if cax is None else cax[num]
+            if isinstance(cax, plt.Axes):
+                cax_to_use = cax
+            else: cax_to_use = plt.subplot(gs_to_use) if cax is None else cax[num]
             create_colorbar(c, cax=cax_to_use, levels=levels_to_use, extend=extend, orientation='horizontal',
                             font_scale=font_scale, cbar_title=cbar_title)
             colobar_completed = True if matching_levels_for_all else False
 
     if return_all: return fig, gs, axes
 
-def plot_stable_year_all_models(ds, fig=None, ax=None, linestyle='solid', exp_type=None, add_legend=True, 
+def plot_stable_year_all_models(ds, fig=None, ax=None, linestyle='dashed', exp_type=None, add_legend=True, 
                                legend_loc='right', ncol=1, bbox_to_anchor=None, font_scale=1, labelpad=60,
-                               xlabel='Year of Stabilisation', xlabelpad=20):
+                               xlabel='Year of Stabilisation', xlabelpad=20, xlim=None):
+    ''''
+    Plotting the year of stabilisation at each window for different models
     '''
-    Plot the year of stabilisation at each window for different models.
-
-    Args:
-        window_stabilization_data (xarray.Dataset): Data containing the year of stabilisation at each window for different models.
-        fig (matplotlib.figure.Figure, optional): Figure to plot on. If None, create a new figure. Defaults to None.
-        ax (matplotlib.axes.Axes, optional): Axes to plot on. If None, create a new axes. Defaults to None.
-        linestyle (str, optional): Linestyle of the plotted lines. Defaults to 'solid'.
-        exp_type (str, optional): Experiment type. Defaults to None.
-        add_legend (bool, optional): Whether to add a legend. Defaults to True.
-        legend_loc (str, optional): Location of the legend. Defaults to 'right'.
-        ncol (int or str, optional): Number of columns for the legend. If 'coords', use the number of models. Defaults to 1.
-        bbox_to_anchor (tuple, optional): Bounding box for the legend. Defaults to None.
-        font_scale (float, optional): Scaling factor for the font size. Defaults to 1.
-        labelpad (int, optional): Padding for the axis labels. Defaults to 60.
-        xlabel (str, optional): Label for the x-axis. Defaults to 'Year of Stabilisation'.
-        xlabelpad (int, optional): Padding for the x-axis label. Defaults to 20.
-
-    Returns:
-        matplotlib.figure.Figure: The figure.
-        matplotlib.axes.Axes: The axes.
-    '''
-    plt.style.use('seaborn-darkgrid')
+    plt.style.use('default')
     if not fig: fig = plt.figure(figsize=(10, 8))
     if not ax: ax = fig.add_subplot(111)
     if exp_type:
         information_profile = MODEL_PROFILES[exp_type]
         models = [model for model in list(information_profile) if model in ds.model.values]
     else:
-        colors = constants.RANDOM_COLOR_LIST; models = ds.model.values
+        colors = constants.RANDOM_COLOR_LIST
+        models = ds.model.values
       
-    ds.median(dim='model').time.plot(ax=ax,y='window', label='Median', color='k', linewidth=4, linestyle='solid') 
+    
+    ds.mean(dim='model').time.plot(ax=ax,y='window', label='Mean', color='k', linewidth=2.5, 
+                                    linestyle='solid') 
     
     for num, model in enumerate(models):
-        if not exp_type: kwargs_to_use = dict(color = colors[num], label=model)
+        if not exp_type:
+            color = colors[num]; label=model
         else:
+            color = information_profile[model]['color']
             ECS = information_profile[model]['ECS']
-            kwargs_to_use = dict(color=information_profile[model]['color'], label=f'{model} ({ECS=}K)', linestyle=information_profile[model]['linestyle'])
-            
-        da = ds.sel(model=model).time.plot(ax=ax,y='window', linewidth=3, alpha=0.8, **kwargs_to_use)
+            label = f'{model} ({ECS=}K)'
+        da = ds.sel(model=model).time.plot(ax=ax,y='window', linewidth=1.5, alpha=0.8,
+                                           color=color, label=label, linestyle=linestyle)
         
     ylims = np.take(ds.window.values, [0,-1])
-    xlims = [np.min(ds.time.values)-5, np.max(ds.time.values)]
+    # xlims = [np.min(ds.time.values)-5, np.max(ds.time.values)]
+    # ax.set_xlim(xlims)
+    if xlim: ax.set_xlim(xlim)
+    ax.set_ylim(ylims)
     if isinstance(ncol, str):
         if ncol == 'coords': ncol = len(models)
     if add_legend:
@@ -720,17 +828,18 @@ def plot_stable_year_all_models(ds, fig=None, ax=None, linestyle='solid', exp_ty
         leg.set_title('Model')
         leg.get_title().set_fontsize(constants.PlotConfig.legend_title_size*font_scale)
     plotting_functions.format_axis(ax, xlabel=xlabel, ylabel='Window Length\n(Years)',
-                                   font_scale=font_scale, xlabelpad=xlabelpad, labelpad=labelpad)
+                                   font_scale=font_scale, xlabelpad=xlabelpad, labelpad=labelpad,
+                                  invisible_spines=['top', 'right'])
     ax.set_title('')
     
     return fig, ax
 
-def plot_median_stable_year(ds1, ds2, fig=None, ax=None):
+def plot_median_stable_year(ds1, ds2, fig=None, ax=None, font_scale:float=1):
     ''''
     Plotting the median year of stabilisation at each window for two 
     different datasets.
     '''
-    plt.style.use('seaborn-darkgrid')
+    ##plt.style.use('seaborn-darkgrid')
     if not fig: fig = plt.figure(figsize=(10, 8))
     if not ax: ax = fig.add_subplot(111)
 
@@ -743,13 +852,15 @@ def plot_median_stable_year(ds1, ds2, fig=None, ax=None):
 
     ylims = np.take(ds1.window.values, [0,-1])
     xlims = [np.min(ds1.time.values)-5, np.max(ds1.time.values)]
-    leg = ax.legend(ncol=1, bbox_to_anchor=[1, 0.857], frameon=True, facecolor='white', 
-                   fontsize=14)
+    leg = ax.legend(ncol=1, loc='best', frameon=True, facecolor='white', 
+                   fontsize=14) #  bbox_to_anchor=[1, 0.857]
     leg.set_title('Noise Type')
     leg.get_title().set_fontsize('16')
-    ax.set_xlabel('Year of Stabilisation', fontsize=16)
-    ax.set_ylabel('Window Length (years)', fontsize=16)
-    ax.tick_params(axis='x', labelsize=14)
-    ax.tick_params(axis='y', labelsize=14)
+    plotting_functions.format_axis(ax, xlabel='Window Length (years)', ylabel='Window Length\n(Years)',
+                                   font_scale=font_scale, invisible_spines=['top', 'right'])
+    # ax.set_xlabel('Year of Stabilisation', fontsize=16)
+    # ax.set_ylabel('Window Length (years)', fontsize=16)
+    # ax.tick_params(axis='x', labelsize=14)
+    # ax.tick_params(axis='y', labelsize=14)
     ax.set_title('')
     return fig, ax

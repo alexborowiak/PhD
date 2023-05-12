@@ -40,3 +40,4 @@ class locationsLatLon2(Enum):
     EASTERN_PACIFIC = (-19.569, -85.411)
     ARCTIC = (77.0169, 119.781)
     ANTARCTIC = (-63.671, 89.899)
+    NORTHERN_EUROPE = (60.08, 36.32)

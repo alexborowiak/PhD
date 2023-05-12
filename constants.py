@@ -12,8 +12,8 @@ LONGRUNMIP_MASK_DIR = os.path.join(LONGRUNMIP_DIR, 'landesea_masks')
 ZECMIP_DIR = '/g/data/oi10/replicas/CMIP6/C4MIP'
 DECK_DIR = '/g/data/oi10/replicas/CMIP6/CMIP'
 
-IMAGE_SAVE_DIR_INIT = '/home/563/ab2313/gdata/images/PhD/init'
-IMAGE_SAVE_DIR_TOP_LEVEL = '/home/563/ab2313/gdata/images/PhD/top_level'
+IMAGE_SAVE_DIR_INIT = '/g/data/w40/ab2313/images/PhD/init'
+IMAGE_SAVE_DIR_TOP_LEVEL = '/g/data/w40/ab2313/images/PhD/top_level'
 
 MODULE_DIR = '/home/563/ab2313/Documents/PhD/modules'
 
@@ -82,15 +82,26 @@ ZECMIP_MODELS = ['CESM2',
 
 
 ZECMIP_MODEL_PARAMS = {
-     'NorESM2-LM':     {'ECS': 2.54, 'color': '#94FB33', 'linestyle': 'solid'},
-     'MIROC-ES2L':     {'ECS': 2.7,  'color': '#A0E24C', 'linestyle': 'dashed'},
-     'MPI-ESM1-2-LR':  {'ECS': 2.83, 'color': '#ACC865', 'linestyle': 'dashdot'},
-     'GISS-E2-1-G-CC': {'ECS': 2.9,  'color': '#B8AF7E', 'linestyle': 'dotted'}, # ECS value needs revision
-     'GFDL-ESM4':      {'ECS': 3.1,  'color': '#C49597', 'linestyle': (0, (3, 1, 1, 1))},
-     'CESM2':          {'ECS': 5.1,  'color': '#D07CB0', 'linestyle': (0, (3, 1, 1, 1, 1, 1))},
-     'UKESM1-0-LL':    {'ECS': 5.4,  'color': '#DC62C9', 'linestyle': (0, (1, 1))},
-     'CanESM5':        {'ECS': 5.7,  'color': '#F42FFB', 'linestyle': (0, (1, 3))},
-}
+     'NorESM2-LM':     {'ECS': 2.54, 'color': '#FDFD96'},
+     'MIROC-ES2L':     {'ECS': 2.7,  'color': '#FFC926'},
+     'MPI-ESM1-2-LR':  {'ECS': 2.83, 'color': '#FF8C00'},
+     'GISS-E2-1-G-CC': {'ECS': 2.9,  'color': '#FF5733'}, # ECS value needs revision
+     'GFDL-ESM4':      {'ECS': 3.1,  'color': '#FF2A00'},
+     'CESM2':          {'ECS': 5.1,  'color': '#B90000'},
+     'UKESM1-0-LL':    {'ECS': 5.4,  'color': '#7F0000'},
+     'CanESM5':        {'ECS': 5.7,  'color': '#3F0000'},
+ }
+
+# ZECMIP_MODEL_PARAMS = {
+#      'NorESM2-LM':     {'ECS': 2.54, 'color': '#94FB33', 'linestyle': 'solid'},
+#      'MIROC-ES2L':     {'ECS': 2.7,  'color': '#A0E24C', 'linestyle': 'dashed'},
+#      'MPI-ESM1-2-LR':  {'ECS': 2.83, 'color': '#ACC865', 'linestyle': 'dashdot'},
+#      'GISS-E2-1-G-CC': {'ECS': 2.9,  'color': '#B8AF7E', 'linestyle': 'dotted'}, # ECS value needs revision
+#      'GFDL-ESM4':      {'ECS': 3.1,  'color': '#C49597', 'linestyle': (0, (3, 1, 1, 1))},
+#      'CESM2':          {'ECS': 5.1,  'color': '#D07CB0', 'linestyle': (0, (3, 1, 1, 1, 1, 1))},
+#      'UKESM1-0-LL':    {'ECS': 5.4,  'color': '#DC62C9', 'linestyle': (0, (1, 1))},
+#      'CanESM5':        {'ECS': 5.7,  'color': '#F42FFB', 'linestyle': (0, (1, 3))},
+# }
 
 # ZECMIP_MODEL_PARAMS = {
 #      'NorESM2-LM':     {'ECS': 2.54, 'color': '#94FB33'},

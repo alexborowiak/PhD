@@ -173,7 +173,9 @@ class SignalToNoise:
               
         data = self._obj
         
-        time_adjsut_value = int((window - 1)/2)
+        time_adjsut_value = int((window - 1)/2)+1
+        # If the window is even, then it needs to be shifted back one.
+        if window%2: time_adjsut_value = time_adjsut_value - 1
         logger.debug(f'Adjusting time points by {time_adjsut_value}')
 
         # This will get rid of all the NaN points on either side that arrises due to min_periods.
