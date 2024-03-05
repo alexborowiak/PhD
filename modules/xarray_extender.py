@@ -47,6 +47,41 @@ def dask_percentile(array: np.ndarray, axis: str, q: float):
         drop_axis=axis)
 
 
+def percentile(da: xr.DataArray, dim: str, q: float) -> xr.DataArray:
+    """
+    Calculate the percentile along the specified dimension of the DataArray.
+
+    Parameters:
+        da (xarray.DataArray): The input DataArray.
+        dim (str): The dimension along which to compute the percentile.
+        q (float): The percentile value to calculate (between 0 and 100).
+
+    Returns:
+        xarray.DataArray: A new DataArray containing the computed percentile values.
+
+    Note:
+        If the input DataArray (`da`) is chunked (i.e., a dask array), this function
+        will use `dask.array.nanpercentile` to calculate the percentile, otherwise,
+        it will use `numpy.nanpercentile`.
+
+    Example:
+        import xarray as xr
+        import numpy as np
+
+        # Create a sample DataArray
+        data = xr.DataArray(np.random.rand(10, 20), dims=['time', 'space'])
+
+        # Calculate the 75th percentile along the 'time' dimension
+        result = percentile(data, dim='time', q=75)
+    """
+
+    # Check if the DataArray is chunked
+    if da.chunks:
+        # If chunked (dask array), use dask_percentile from Xarray
+        return da.reduce(dask_percentile, dim=dim, q=q)
+    # If not chunked, use numpy.nanpercentile
+    return da.reduce(np.nanpercentile, dim=dim, q=q)
+
 def convert_dimension_to_data_vars(da: xr.DataArray, dim:str) -> xr.Dataset:
     '''Given a data array that has a dimension dim. Change this dimension 
     to variables

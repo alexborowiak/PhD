@@ -165,29 +165,65 @@ class SignalToNoise:
         numerator = (t1-t2)
         result = numerator/denominator
         return result    
-        
+  
 
     def adjust_time_from_rolling(self, window, logginglevel='ERROR'):
-        
+        """
+        Adjusts time points in the dataset by removing NaN values introduced by rolling operations.
+    
+        Parameters:
+        - window (int): The size of the rolling window.
+        - logginglevel (str): The logging level for debugging information ('ERROR', 'WARNING', 'INFO', 'DEBUG').
+    
+        Returns:
+        - data_adjusted (xarray.Dataset): Dataset with adjusted time points.
+    
+        Notes:
+        - This function is designed to handle cases where rolling operations introduce NaN values at the edges of the dataset.
+        - The time points are adjusted to remove NaN values resulting from rolling operations with a specified window size.
+        - The position parameter controls where the adjustment is made: 'start', 'start', or 'end'.
+    
+        """
+        # Change the logging level based on the provided parameter
         utils.change_logging_level(logginglevel)
-              
+    
+        # Get the dataset from the object
         data = self._obj
-        
-        time_adjsut_value = int((window - 1)/2)+1
-        # If the window is even, then it needs to be shifted back one.
-        if window%2: time_adjsut_value = time_adjsut_value - 1
-        logger.debug(f'Adjusting time points by {time_adjsut_value}')
+    
+        # Calculate the adjustment value for the time points
+        time_adjust_value = int((window - 1) / 2) + 1
 
-        # This will get rid of all the NaN points on either side that arrises due to min_periods.
-        data_adjusted = data.isel(time = slice(time_adjsut_value,-time_adjsut_value))
+        # If the window is even, adjust the time value back by one
+        if window % 2:
+            time_adjust_value = time_adjust_value - 1
+    
+        # Log the adjustment information
+        logger.debug(f'Adjusting time points by {time_adjust_value}')
+    
+        # Remove NaN points on either side introduced by rolling with min_periods
+        data_adjusted = data.isel(time=slice(time_adjust_value, -time_adjust_value))
+    
+        # Ensure the time coordinates match the adjusted data
+        # The default option is the middle
+        adjusted_time_length = len(data_adjusted.time.values)
+        # if position == 'start': time_slice = slice(0, adjusted_time_length)
+        # elif position == 'end': 
+        #     end_time = len(data.time.values)+time_adjust_value
+        #     if not window%2:
+ 
+        #         end_time = end_time+1
+        #     time_slice = slice(time_adjust_value, end_time)
 
-        # We want the time to match what the data is (will be shifter otherwise).
-        data_adjusted['time'] = data.time.values[:len(data_adjusted.time.values)]
-
+        time_slice = slice(0, adjusted_time_length)
+        new_time = data.time.values[time_slice]
+        data_adjusted['time'] = new_time#data.time.values[time_slice]
+        # data_adjusted['time'] = data.time.values[:len(data_adjusted.time.values)]
+    
         return data_adjusted
+
     
-    
-    def rolling_signal(self, window:int = 61, min_periods:int = 0, logginglevel='ERROR') -> xr.DataArray:
+    def rolling_signal(self, window:int = 20, min_periods:int = 0, center=True,
+                       method:str='gradient', logginglevel='ERROR') -> xr.DataArray:
         '''
         Previosuly signal_grad
         '''
@@ -203,15 +239,28 @@ class SignalToNoise:
             min_periods = window
 
         logger.debug(f'{window=}, {min_periods=}\ndata=\n{data}')
-        # Rolling gradient * window
-        xs = np.arange(window)
-        mean_xs = np.nanmean(xs)
-        denominator = np.mean(xs) **2 - np.mean(xs**2)
-        mean_xs = np.nanmean(xs)
-        signal_da = data.rolling(time=window, min_periods=min_periods, center=True).reduce(
-            self.__grid_gradient, xs=xs, mean_xs=mean_xs, denominator=denominator) * window
+
+        logger.info(f'Signal method calculation using {method=}')
+        if method == 'gradient':
+            # Rolling gradient * window
+            xs = np.arange(window)
+            mean_xs = np.nanmean(xs)
+            denominator = np.mean(xs) **2 - np.mean(xs**2)
+            mean_xs = np.nanmean(xs)
+            signal_da = data.rolling(time=window, min_periods=min_periods, center=center).reduce(
+                self.__grid_gradient, xs=xs, mean_xs=mean_xs, denominator=denominator) * window
     
-        signal_da = signal_da.sn.adjust_time_from_rolling(window = window, logginglevel=logginglevel)
+            # The rolling is applied in the start. Thus, the datasets need to be moved forewards or backwards
+            # depending on where we want it to start from
+            if center == True:
+                signal_da = signal_da.sn.adjust_time_from_rolling(window=window, logginglevel=logginglevel)
+            else:
+                signal_da = signal_da.dropna(dim='time')
+
+        elif method == 'periods':
+            signal_da = sn.calculate_rolling_period_diff(data, window)
+        else:
+            raise TypeError(f'method must be one of [gradient, periods]. value entered {method=}')
     
         signal_da.name = 'signal'
         
@@ -220,7 +269,7 @@ class SignalToNoise:
         return signal_da
     
     
-    def calculate_rolling_noise(self, window = 61, min_periods = 0,logginglevel='ERROR') -> xr.DataArray:
+    def calculate_rolling_noise(self, window = 61, min_periods = 0,center=True,logginglevel='ERROR') -> xr.DataArray:
         
         utils.change_logging_level(logginglevel)
 
@@ -235,8 +284,12 @@ class SignalToNoise:
         # Rolling standard deviation
         noise_da = \
            data.rolling(time = window, min_periods = min_periods, center = True).std()
-            
-        noise_da = noise_da.sn.adjust_time_from_rolling(window=window, logginglevel=logginglevel) 
+
+        if center == True:
+            noise_da = noise_da.sn.adjust_time_from_rolling(window=window, logginglevel=logginglevel)
+        else:
+            noise_da = noise_da.dropna(dim='time')
+        # noise_da = noise_da.sn.adjust_time_from_rolling(window=window, position=position, logginglevel=logginglevel) 
         
         noise_da.name = 'noise'
         

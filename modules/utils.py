@@ -1,13 +1,23 @@
 import os
 import logging, sys
+import cftime
 
 import numpy as np
+import xarray as xr
 
-from typing import Union
-
+from typing import List, Union
 logging.basicConfig(format="- %(message)s", filemode='w', stream=sys.stdout)
 logger = logging.getLogger()
 
+
+import inspect
+
+def function_name():
+    caller_name = inspect.currentframe().f_back.f_code.co_name
+    return f"**Calling function: {caller_name}"
+
+def print_function_name():
+    print(function_name())
 
 def function_details(func):
     '''
@@ -51,6 +61,9 @@ def get_notebook_logger():
 def change_logging_level(logginglevel: str):
     eval(f'logging.getLogger().setLevel(logging.{logginglevel})')
     
+def change_logginglevel(logginglevel: str):
+    change_logging_level(logginglevel)
+    
     
 change_logginglevel = change_logging_level
 
@@ -84,25 +97,52 @@ def convert_period_string(period):
     return f"Years {int(period_list[0]) + 1} to {int(period_list[1]) + 1}"
 
 
-def pprint_list_string(l: list, num_start_items=2, num_end_items=0):
-    '''This version is useful for logging moduel'''
+def pprint_list_string(
+    l: List[Union[str, int, float]],
+    num_start_items: int = 2,
+    num_end_items: int = 0
+) -> str:
+    '''
+    Generate a formatted string representation of a list, with specified number
+    of start and end items included.
     
-    to_print = f'lenght = {len(l)}'
-    for i in range(num_start_items):
-        to_print += f'\n {i}. {str(l[i])}'
-        
+    Args:
+        l: The list to be printed.
+        num_start_items: The number of items to include from the start of the list.
+        num_end_items: The number of items to include from the end of the list.
+    
+    Returns:
+        A formatted string representation of the list.
+    '''
+    length = len(l)
+    start_items = [f'{i}. {str(item)}' for i, item in enumerate(l[:num_start_items])]
+    end_items = [f'{-j}. {str(item)}' for j, item in enumerate(l[-num_end_items:], start=1)]
+    
+    to_print = f'length = {length}\n'
+    to_print += '\n'.join(start_items)
+    
     if num_end_items:
         to_print += '\n...\n'
-    for j in range(1, num_end_items+1):
-        to_print += f'\n {-j}. {str(l[-j])}'
+        to_print += '\n'.join(end_items)
         
     return to_print
 
 
-def pprint_list(*args, **kwargs) -> None:
-    '''A nicer print of a list with more information'''
+def pprint_list(
+    *args: List[Union[str, int, float]],
+    **kwargs: Union[int]
+) -> None:
+    '''
+    Print a formatted representation of a list with additional information.
+    
+    Args:
+        l: The list to be printed.
+        num_start_items: The number of items to include from the start of the list.
+        num_end_items: The number of items to include from the end of the list.
+    '''
+    output = pprint_list_string(*args, **kwargs)
+    print(output)
 
-    print(pprint_list_string(*args, **kwargs))
     
     
 def mkdir_no_error(ROOT_DIR):
@@ -162,3 +202,54 @@ def get_tick_locator(vals: np.ndarray, num_major_ticks: int=10, fraction_minor_t
     minor_location = major_locations/fraction_minor_ticks
     
     return (major_locations, minor_location)
+
+
+
+
+
+def convert_to_0_start_cftime(time, freq='Y'):
+    """
+    Convert time values to a new time range with a starting year of 0 (year 1 AD).
+
+    This function takes an array of time values, adjusts them to start from year 0 (1 AD),
+    and returns a new time range based on the adjusted values.
+
+    Args:
+        time (numpy.ndarray): Array of time values.
+        freq (str, optional): Frequency string for the new time range. Default is 'Y' (yearly).
+
+    Returns:
+        pandas.DatetimeIndex: A new time range starting from year 0 with the adjusted time values.
+    """
+
+    t0, tf = np.take(time, [0, -1])
+
+    # Define the new start time as year 0
+    t0_new = cftime.datetime(1, 1, 1, 0, 0, 0, 0, calendar='gregorian')
+
+    # Calculate the new end time based on the difference between the original end time and start time
+    tf_new = t0_new + (tf - t0) if freq is None else None
+
+    # Generate a new time range using xarray's cftime_range
+    new_time = xr.cftime_range(start=t0_new, end=tf_new, periods=len(time), freq=freq)
+
+    return new_time
+
+
+
+def reset_time_to_0_start(ds: Union[xr.Dataset, xr.DataArray]) ->  Union[xr.Dataset, xr.DataArray]:
+    """
+    Reset the time values of an xarray Dataset or DataArray to start from year 0 (1 AD).
+
+    This function takes an xarray Dataset or DataArray and adjusts its time values to start from year 0 (1 AD).
+
+    Args:
+        ds (Union[xr.Dataset, xr.DataArray]): The xarray Dataset or DataArray with time values to be reset.
+
+    Returns:
+        Union[xr.Dataset, xr.DataArray]: The input xarray Dataset or DataArray with adjusted time values.
+    """
+
+    # Call the convert_to_0_start_cftime function to adjust time values
+    ds['time'] = convert_to_0_start_cftime(ds.time.values)
+    return ds

@@ -1,6 +1,9 @@
 from enum import Enum
 
 
+class ObsoleteFunctionError(Exception):
+    pass
+
 class detrendingMethods(str, Enum):
     POLYNOMIAL = 'polynomial'
     LOWESS = 'lowess'
@@ -8,10 +11,11 @@ class detrendingMethods(str, Enum):
 class ExperimentTypes(str, Enum):
     CONTROL = 'control'
     ABRUPT4X = 'abrupt4x'
+    TREND_FIT = 'trend_fit'
     SIGNAL_TO_NOISE = 'signal_to_noise'
-    SIGNAL_TO_NOISE_STABLE = 'signal_to_noise_stable'
-    SIGNAL_TO_NOISE_DECREASING = 'signal_to_noise_decreasing'
-    SIGNAL_TO_NOISE_INCREASING = 'signal_to_nosie_increasing'
+    # SIGNAL_TO_NOISE_STABLE = 'signal_to_noise_stable'
+    # SIGNAL_TO_NOISE_DECREASING = 'signal_to_noise_decreasing'
+    # SIGNAL_TO_NOISE_INCREASING = 'signal_to_nosie_increasing'
     
     
 class LongRunMIPError(Exception):
@@ -41,3 +45,4 @@ class locationsLatLon2(Enum):
     ARCTIC = (77.0169, 119.781)
     ANTARCTIC = (-63.671, 89.899)
     NORTHERN_EUROPE = (60.08, 36.32)
+    SOUTHERN_OCEAN = (-54, 145.69) # This point is a good point as it undergoes a lot of change

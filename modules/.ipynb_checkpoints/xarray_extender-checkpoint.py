@@ -1,11 +1,11 @@
-# +
 import xarray as xr
 import numpy as np
 
+import utils
+logger = utils.get_notebook_logger()
+
 from typing import Dict
 
-
-# -
 
 def xr_dict_to_xr_dataset(data: Dict[str, xr.Dataset]):
     '''Takes a dicionary that has the model name and then model values
@@ -47,6 +47,41 @@ def dask_percentile(array: np.ndarray, axis: str, q: float):
         drop_axis=axis)
 
 
+def percentile(da: xr.DataArray, dim: str, q: float) -> xr.DataArray:
+    """
+    Calculate the percentile along the specified dimension of the DataArray.
+
+    Parameters:
+        da (xarray.DataArray): The input DataArray.
+        dim (str): The dimension along which to compute the percentile.
+        q (float): The percentile value to calculate (between 0 and 100).
+
+    Returns:
+        xarray.DataArray: A new DataArray containing the computed percentile values.
+
+    Note:
+        If the input DataArray (`da`) is chunked (i.e., a dask array), this function
+        will use `dask.array.nanpercentile` to calculate the percentile, otherwise,
+        it will use `numpy.nanpercentile`.
+
+    Example:
+        import xarray as xr
+        import numpy as np
+
+        # Create a sample DataArray
+        data = xr.DataArray(np.random.rand(10, 20), dims=['time', 'space'])
+
+        # Calculate the 75th percentile along the 'time' dimension
+        result = percentile(data, dim='time', q=75)
+    """
+
+    # Check if the DataArray is chunked
+    if da.chunks:
+        # If chunked (dask array), use dask_percentile from Xarray
+        return da.reduce(dask_percentile, dim=dim, q=q)
+    # If not chunked, use numpy.nanpercentile
+    return da.reduce(np.nanpercentile, dim=dim, q=q)
+
 def convert_dimension_to_data_vars(da: xr.DataArray, dim:str) -> xr.Dataset:
     '''Given a data array that has a dimension dim. Change this dimension 
     to variables
@@ -84,7 +119,6 @@ def convert_dimension_to_data_vars(da: xr.DataArray, dim:str) -> xr.Dataset:
             UKESM1-0-LL     (time) float64 2.681 2.827 2.819 2.842 ... 2.888 2.884 2.924
       
     '''
-    dim = 'model'
     dim_values = da[dim].values
 
     to_merge = []
@@ -110,16 +144,31 @@ def add_lower_upper_to_dataset(da: xr.DataArray, lower: xr.DataArray, upper:xr.D
     return ds
 
 
-
-def get_median_and_uncertainty_across_dim(ds: xr.Dataset, dim: str):
+# previosly get_median_and_uncertainty_across_dim
+def get_average_and_uncertainty_across_dim(ds:xr.Dataset, dim:str, var:str='time', logginglevel='INFO',
+                                           averaging_method='mean', uncertainty_method:str='percent'):
+    '''
+    Calcualtes the median and unvertainty
+    uncertainty_method: str
+        Options: percent, max_min
+    '''
     
-    median_ds = ds.median(dim=dim).rename({'time': 'median_value'})
-    uncertainty_ds = np.abs((ds.max(dim=dim) -\
-                            ds.min(dim=dim))/2)
+    utils.change_logginglevel(logginglevel)
+    logger.info(f'{averaging_method=}, {uncertainty_method=}')
+    if averaging_method == 'median':
+        average_ds = ds.median(dim=dim)
+    elif averaging_method == 'mean':
+        average_ds = ds.mean(dim=dim)
+        
+    if uncertainty_method == 'percent':
+        uncertainty_ds = np.abs((ds.max(dim=dim) - ds.min(dim=dim)) *100/average_ds)
+    elif uncertainty_method == 'max_min':
+        uncertainty_ds = np.abs((ds.max(dim=dim) - ds.min(dim=dim))/2)
     
-    uncertainty_ds = uncertainty_ds.rename({'time': 'uncertainty'})
+    average_ds = average_ds.rename({var: 'average_value'})
+    uncertainty_ds = uncertainty_ds.rename({var: 'uncertainty'})
 
-    return xr.merge([median_ds, uncertainty_ds])
+    return xr.merge([average_ds, uncertainty_ds])
 
 
 

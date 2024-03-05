@@ -12,10 +12,18 @@ from classes import ExperimentTypes, LongRunMIPError
 import signal_to_noise
 import utils
 logger = utils.get_notebook_logger()
-
+from utils import pprint_list
 
 ### ZECMIP
+def open_and_rename(fname, open_func, model:str=None):
+    '''Open the file, then add the model dimension'''
+    ds = open_func(fname)
+    
+    if not model: model = fname.split('/')[8]
+    print(f'{model} ({fname})')
+    ds = ds.expand_dims('model').assign_coords(model=('model', [model]))
 
+    return ds
 
 def open_mfdataset_nc(path, dropna=True, to_array=True):
     path = os.path.join(path, '*.nc')
@@ -26,10 +34,22 @@ def open_mfdataset_nc(path, dropna=True, to_array=True):
         da = da.to_array()
     return da.squeeze()
 
+def reformat_giss_key_for_onepct(onepct_zec_da):
+    '''
+    The one percent for GISS did not have a -G version. Thus, all this function does is swap the key/name around
+    '''
+
+    # TODO: This code is not very safe. 
+    model_values = onepct_zec_da.model.values.astype('U16')
+    model_values[np.where(model_values == 'GISS-E2-1-G')[0][0]] = 'GISS-E2-1-G-CC'
+
+    onepct_zec_da['model'] = xr.DataArray(model_values, dims='model')
+    return onepct_zec_da
+
 
 ### Longrunmip
 
-def get_models_longer_than_length(experiment_length: int = 700, control_length: int = 500, debug=False) -> List[str]:
+def get_models_longer_than_length(experiment_length:int = 700, control_length: int = 500, debug=False) -> List[str]:
     '''
     Gets all the file names for the models longer than a certain length.
     '''
@@ -199,6 +219,7 @@ def read_longrunmip_netcdf(fname: str, ROOT_DIR: str = '',
 
     model = fname.split('_')[model_index].lower() # Need to open da and alter length and names of vars
     model = os.path.basename(model) # Ocassionally fname can contain parts of a path
+    logger.debug(f'{model=}')
     
     ds = xr.open_dataset(fpath)
         
@@ -301,7 +322,7 @@ def read_and_merge_netcdfs(fnames: List[str], ROOT_DIR:str='', var:str=None, no_
 
 
 @utils.function_details
-def open_experiment_files(experiment_params: dict, experiment: ExperimentTypes, models_to_get:List[str]=None,
+def open_experiment_files(experiment_params: dict, experiment: ExperimentTypes, folder:str='regrid_retimestamped', models_to_get:List[str]=None,
                           max_length:int=None, no_time_extension:bool=True, 
                           combine_to_coord:bool=True, new_coord_name:str = 'model',
                           keep_time_stamp:bool=True, logginglevel='INFO'):
@@ -332,7 +353,7 @@ def open_experiment_files(experiment_params: dict, experiment: ExperimentTypes, 
     if not models_to_get: models_to_get = get_models_longer_than_length()
     logger.info(f'{models_to_get}=')
         
-    ROOT_DIR = os.path.join(constants.LONGRUNMIP_DIR, experiment_params["variable"], 'regrid_retimestamped')
+    ROOT_DIR = os.path.join(constants.LONGRUNMIP_DIR, experiment_params["variable"], folder)
     logger.info(f'{ROOT_DIR}=')
     
     files_to_open = get_file_names_from_from_directory(ROOT_DIR, experiment, models_to_get)
@@ -473,8 +494,7 @@ def correct_dataset(ds, debug=False, **kwargs):
     
     '''This function makes a dataset of into standard format.'''
 
-    if isinstance(ds, xr.DataArray):
-        ds = ds.to_dataset()
+    if isinstance(ds, xr.DataArray): ds = ds.to_dataset()
     
     # Making sure main dims are lat, lon and time. 
     ds = refactor_dims(ds)
@@ -500,10 +520,9 @@ def correct_dataset(ds, debug=False, **kwargs):
     t0_new = cftime.datetime(1, 1, 1, 0, 0, 0, 0, calendar='gregorian')
     # New end time is the total length of the old dataset added to t0
     tf_new = t0_new + (tf - t0)
-    if debug:
-        print(f'New time dim will range between {t0_new} and {tf_new}')
-    new_time = xr.cftime_range(start = t0_new, end = tf_new, periods = len(ds['time'].values), 
-                               freq=None)
+    if debug: print(f'New time dim will range between {t0_new} and {tf_new}')
+    
+    new_time = xr.cftime_range(start=t0_new, end=tf_new, periods=len(ds['time'].values), freq=None)
     
     if debug:
         print('Old time values')
@@ -513,7 +532,7 @@ def correct_dataset(ds, debug=False, **kwargs):
         print(new_time[:4])
         print(new_time[-4:])
     
-    ds['time'] =  new_time
+    ds['time'] = new_time
     
     if debug:
         print('Resampling to yearly data')

@@ -1,6 +1,8 @@
 import os
 from typing import NamedTuple
 
+import numpy as np
+
 PHD_ROOT_DIR = '/g/data/w40/ab2313/PhD'
 
 LONGRUNMIP_DIR = PHD_ROOT_DIR + '/longrunmip'
@@ -29,6 +31,8 @@ class PlotConfig(NamedTuple):
 # Chunks to be used for LongRunMIP when all models are loaded in. This is used
 # as a lot of the calculations used with LongRunMIP rolling time.
 LONGRUNMIP_CHUNKS = {'time':-1, 'lon': 144/4, 'lat': 72/2}
+
+
 # Note the untis are not the base units, but the units I desire
 VARIABLE_INFO = variables = {
     'tas': 
@@ -70,49 +74,69 @@ VARIABLE_INFO = variables = {
 # This was created using: open_ds.get_models_longer_than_length()
 # 'cesm104' removed as it has too short of a length for all variables but temperature.
 LONGRUNMIP_MODELS = ['ccsm3', 'cnrmcm61', 'hadcm3l', 'ipslcm5a', 'mpiesm11', 'mpiesm12']
-ZECMIP_MODELS = ['CESM2',
-                 'CanESM5', # Model is short. Lenght ~ 100 years
-                 'GFDL-ESM4',
-                 'GISS-E2-1-G-CC',
-                 'MIROC-ES2L',
-                 'MPI-ESM1-2-LR',
-                 'NorESM2-LM' #Model is  short. Lenght ~ 100 years
-                 'UKESM1-0-LL']
 
-
-
-ZECMIP_MODEL_PARAMS = {
-     'NorESM2-LM':     {'ECS': 2.54, 'color': '#FDFD96'},
-     'MIROC-ES2L':     {'ECS': 2.7,  'color': '#FFC926'},
-     'MPI-ESM1-2-LR':  {'ECS': 2.83, 'color': '#FF8C00'},
-     'GISS-E2-1-G-CC': {'ECS': 2.9,  'color': '#FF5733'}, # ECS value needs revision
-     'GFDL-ESM4':      {'ECS': 3.1,  'color': '#FF2A00'},
-     'CESM2':          {'ECS': 5.1,  'color': '#B90000'},
-     'UKESM1-0-LL':    {'ECS': 5.4,  'color': '#7F0000'},
-     'CanESM5':        {'ECS': 5.7,  'color': '#3F0000'},
- }
 
 # ZECMIP_MODEL_PARAMS = {
-#      'NorESM2-LM':     {'ECS': 2.54, 'color': '#94FB33', 'linestyle': 'solid'},
-#      'MIROC-ES2L':     {'ECS': 2.7,  'color': '#A0E24C', 'linestyle': 'dashed'},
-#      'MPI-ESM1-2-LR':  {'ECS': 2.83, 'color': '#ACC865', 'linestyle': 'dashdot'},
-#      'GISS-E2-1-G-CC': {'ECS': 2.9,  'color': '#B8AF7E', 'linestyle': 'dotted'}, # ECS value needs revision
-#      'GFDL-ESM4':      {'ECS': 3.1,  'color': '#C49597', 'linestyle': (0, (3, 1, 1, 1))},
-#      'CESM2':          {'ECS': 5.1,  'color': '#D07CB0', 'linestyle': (0, (3, 1, 1, 1, 1, 1))},
-#      'UKESM1-0-LL':    {'ECS': 5.4,  'color': '#DC62C9', 'linestyle': (0, (1, 1))},
-#      'CanESM5':        {'ECS': 5.7,  'color': '#F42FFB', 'linestyle': (0, (1, 3))},
+#      'NorESM2-LM':     {'ECS': 2.54, 'color': [0.2298057, 0.29871797, 0.75368315, 1.0]},
+#      'MIROC-ES2L':     {'ECS': 2.7,  'color': [0.38301334, 0.50941904, 0.91738782, 1.0]},
+#      'MPI-ESM1-2-LR':  {'ECS': 2.83, 'color': [0.55295316, 0.68892933, 0.99537561, 1.0]},
+#      'GISS-E2-1-G-CC': {'ECS': 2.9,  'color': [0.72219329, 0.81395274, 0.97657471, 1.0]},
+#      'GFDL-ESM4':      {'ECS': 3.1,  'color': [0.8653952, 0.86541021, 0.86539556, 1.0]},
+#      'ACCESS-ESM1-5':  {'ECS': 3.87, 'color': [0.95885295, 0.76976775, 0.67800794, 1.0]},
+#      'CESM2':          {'ECS': 5.1,  'color': [0.95800306, 0.60284243, 0.48177591, 1.0]},
+#      'UKESM1-0-LL':    {'ECS': 5.4,  'color': [0.86918685, 0.37831309, 0.30026718, 1.0]},
+#      'CanESM5':        {'ECS': 5.7,  'color': [0.70567316, 0.01555616, 0.15023281, 1.0]}
 # }
 
+# This has been generated in zecmip_stabilitiy_global_(single_ensemble).ipynb
 # ZECMIP_MODEL_PARAMS = {
-#      'NorESM2-LM':     {'ECS': 2.54, 'color': '#94FB33'},
-#      'MIROC-ES2L':     {'ECS': 2.7,  'color': '#A0E24C'},
-#      'MPI-ESM1-2-LR':  {'ECS': 2.83, 'color': '#ACC865'},
-#      'GISS-E2-1-G-CC': {'ECS': 2.9,  'color': '#B8AF7E'}, # ECS value needs revision
-#      'GFDL-ESM4':      {'ECS': 3.1,  'color': '#C49597'},
-#      'CESM2':          {'ECS': 5.1,  'color': '#D07CB0'},
-#      'UKESM1-0-LL':    {'ECS': 5.4,  'color': '#DC62C9'},
-#      'CanESM5':        {'ECS': 5.7,  'color': '#F42FFB'},
-#  }
+#     'GISS-E2-1-G-CC': {'value': -0.09,
+#   'color': np.array([0.30196078, 0.        , 0.29411765, 1.        ])},
+#  'CanESM5': {'value': -0.101,
+#   'color': np.array([0.50588235, 0.05882353, 0.48627451, 1.        ])},
+#  'MIROC-ES2L': {'value': -0.108,
+#   'color': np.array([0.53333333, 0.25490196, 0.61568627, 1.        ])},
+#  'GFDL-ESM4': {'value': -0.204,
+#   'color': np.array([0.54901961, 0.41960784, 0.69411765, 1.        ])},
+#  'MPI-ESM1-2-LR': {'value': -0.27,
+#   'color':np. array([0.54901961, 0.58823529, 0.77647059, 1.        ])},
+#  'CESM2': {'value': -0.31,
+#   'color': np.array([0.61960784, 0.7372549 , 0.85490196, 1.        ])},
+#  'NorESM2-LM': {'value': -0.333,
+#   'color': np.array([0.74901961, 0.82745098, 0.90196078, 1.        ])},
+#  'ACCESS-ESM1-5': {'value': 0.011,
+#   'color': np.array([0.99137255, 0.6972549 , 0.48392157, 1.        ])},
+#  'UKESM1-0-LL': {'value': 0.288,
+#   'color': np.array([0.78666667, 0.11294118, 0.07294118, 1.        ])}}
+
+# NOTE: this comes from zecmip_stability_global_(single_ensemble).ipynb
+ZECMIP_MODEL_PARAMS = {'GISS-E2-1-G-CC': {'value': -0.09, 'color': '#add8e6', 'linestyle': '-'},
+ 'CanESM5': {'value': -0.101, 'color': '#87ceeb', 'linestyle': '--'},
+ 'MIROC-ES2L': {'value': -0.108, 'color': '#6495ed', 'linestyle': '-'},
+ 'GFDL-ESM4': {'value': -0.204, 'color': '#4169e1', 'linestyle': '--'},
+ 'MPI-ESM1-2-LR': {'value': -0.27, 'color': '#1e90ff', 'linestyle': '-'},
+ 'CESM2': {'value': -0.31, 'color': '#0000cd', 'linestyle':'--'},
+ 'NorESM2-LM': {'value': -0.333, 'color': '#00008b','linestyle': '-'},
+ 'ACCESS-ESM1-5': {'value': 0.011,
+  'color': [0.99137255, 0.6972549 , 0.48392157, 1.], 'linestyle': '--'},
+ 'UKESM1-0-LL': {'value': 0.288,
+  'color': [0.78666667, 0.11294118, 0.07294118, 1.], 'linestyle': '-'}}
+
+
+
+# ZECMIP_MODEL_PARAMS = {
+#      'NorESM2-LM':     {'ECS': 2.54, 'color': '#FDE5A2'},
+#      'MIROC-ES2L':     {'ECS': 2.7,  'color': '#FCD275'},
+#      'MPI-ESM1-2-LR':  {'ECS': 2.83, 'color': '#F9AD28'},
+#      'GISS-E2-1-G-CC': {'ECS': 2.9,  'color': '#F77D43'}, # ECS value needs revision
+#      'GFDL-ESM4':      {'ECS': 3.1,  'color': '#F65D3E'},
+#      'ACCESS-ESM1-5':  {'ECS': 3.87, 'color': '#F54F49'}, # https://www.publish.csiro.au/es/pdf/ES19035
+#      'CESM2':          {'ECS': 5.1,  'color': '#F7808E'},
+#      'UKESM1-0-LL':    {'ECS': 5.4,  'color': '#A40601'},
+#      'CanESM5':        {'ECS': 5.7,  'color': '#7F0300'}
+# }
+
+
 
 LONGRUNMIP_MODEL_PARAMS = {
     'gisse2r':  {'ECS' : 2.44, 'color': '#94FB33'},
@@ -143,27 +167,28 @@ EXPERIMENTS_TO_RUN = [
     {'variable': 'surf', 'mask': 'sea', 'hemisphere': 'southern_hemisphere'},
 ]
 
-# SIC GLobal calculations are incorrect. Removing unitl fix has been implemented.
-#     {'variable': 'sic', 'mask': 'sea', 'hemisphere': 'global'},
-#     {'variable': 'sic', 'mask': 'sea', 'hemisphere': 'northern_hemisphere'},
-#     {'variable': 'sic', 'mask': 'sea', 'hemisphere': 'southern_hemisphere'}
-
-
 
 
 
 MULTI_WINDOW_RUN_PARAMS = dict(start_window = 11, end_window = 153, step_window=2)
-ZECMIP_MULTI_WINDOW_RUN_PARAMS = dict(start_window = 11, end_window = 51, step_window=2)
+ZECMIP_MULTI_WINDOW_RUN_PARAMS = {'start_window': 10, 'end_window': 41, 'step_window': 1}
 
 # Windows that have interesing properties. These windows were decided upong from
 # the graphs of the year when models and variables stabailise in the global mean.
 WINDOWS_OF_INTEREST = (21, 81, 151)
 LONGRUNMIP_WINDOWS = (21, 41, 81)
-ZECMIP_WINDOWS = (21, 41)
-LONGRUNMIP_LENGTH = 800 # The length of the longrunmip simulations to use
+ZECMIP_LOCAL_RUN_WINDOWS = (20, 40)
+
+LONGRUNMIP_LENGTH = 700 # The length of the longrunmip simulations to use
+LONGRUMMIP_CONTROL_LENGHT = 500
+
 # Need to make sure all the windows have a full length
 LONGRUNMIP_EFFECTIVE_LENGTH = LONGRUNMIP_LENGTH - WINDOWS_OF_INTEREST[-1]
 
 ###### KWARGS
 
 save_kwargs = dict(dpi=500, bbox_inches='tight')
+
+
+
+
