@@ -16,8 +16,6 @@ from typing import Optional, Dict, Callable
 logger = utils.get_notebook_logger()
 
     
-    
-@utils.function_details
 def polynomial_fit(y: ArrayLike, x:Optional[ArrayLike] = None, order:float=None, deg:float=None) -> ArrayLike:
     """
     Perform a polynomial fit for line y using the Vandermonde matrix method.
@@ -31,6 +29,14 @@ def polynomial_fit(y: ArrayLike, x:Optional[ArrayLike] = None, order:float=None,
     Returns:
         ArrayLike: The fitted line.
     """
+    if all(np.isnan(y)): return y # All values are nan, don't proceed
+    # First need to deal with any nan values at the start or the end
+    number_nans_at_start = np.where(~np.isnan(y))[0][0]
+    number_nans_at_end = np.where(~np.isnan(y[::-1]))[0][0]
+
+    # Remove these nans
+    y = y[number_nans_at_start:] # Remove start nans
+    if number_nans_at_end > 0:  y = y[:-number_nans_at_end] # If number_nans_at_end is then this removes all values
     # If x is not provided, generate linearly increasing values
     x = np.arange(len(y)) if x is None else x
     # Perform polynomial fit using numpy's polyfit function
@@ -39,8 +45,10 @@ def polynomial_fit(y: ArrayLike, x:Optional[ArrayLike] = None, order:float=None,
     coeff = np.polyfit(x, y, deg=deg)
     # Generate the fitted line using the computed coefficients
     fitted_line = np.polyval(coeff, x)
-    
-    return fitted_line
+
+    # Re-add the nans back in to maintain the length
+    fitted_line_lenght_maintained = np.concatenate([[np.nan]*number_nans_at_start, fitted_line, [np.nan] *number_nans_at_end])
+    return fitted_line_lenght_maintained
 
 @utils.function_details
 def lowess_fit(exog: Callable, window:int=50) -> Callable:

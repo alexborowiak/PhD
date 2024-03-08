@@ -7,27 +7,29 @@ TODOL which should either be moved to antoher module, or the name of
 this package module should perhaps be renamed.
 
 '''
+import os, sys
+import inspect
+import itertools
+from functools import partial
+
+from typing import Optional, Union, Dict, Tuple, List, Callable
+from numpy.typing import ArrayLike
 
 import numpy as np
 import pandas as pd
-import itertools
-import inspect
 import xarray as xr
-import xarray_extender as xe
-import os, sys
 sys.path.append('../')
-from functools import partial
-from multiprocessing import Pool
+
+import xarray_extender as xe
 
 import xarray_class_accessors as xca
 import utils
-from typing import Optional, Union, Dict, Tuple, List, Callable
-from numpy.typing import ArrayLike
 from sn_typing import AnyXarray
 
 import classes
 import stats
-from constants import LONGRUNMIP_CHUNKS
+
+
 logger = utils.get_notebook_logger()
 
 
@@ -212,6 +214,50 @@ def __check_concat(to_concat):
 def time_slice_da(da, time_slice):
     logger.info(f'slicing time with integers {time_slice}')
     return da.isel(time=slice(*time_slice))
+
+
+def adjust_time_from_rolling(data, window, logginglevel='ERROR'):
+        """
+        Adjusts time points in the dataset by removing NaN values introduced by rolling operations.
+    
+        Parameters:
+        - window (int): The size of the rolling window.
+        - logginglevel (str): The logging level for debugging information ('ERROR', 'WARNING', 'INFO', 'DEBUG').
+    
+        Returns:
+        - data_adjusted (xarray.Dataset): Dataset with adjusted time points.
+    
+        Notes:
+        - This function is designed to handle cases where rolling operations introduce NaN values at the edges of the dataset.
+        - The time points are adjusted to remove NaN values resulting from rolling operations with a specified window size.
+        - The position parameter controls where the adjustment is made: 'start', 'start', or 'end'.
+    
+        """
+        # Change the logging level based on the provided parameter
+        utils.change_logging_level(logginglevel)
+    
+        # Calculate the adjustment value for the time points
+        time_adjust_value = int((window - 1) / 2) + 1
+
+        # If the window is even, adjust the time value back by one
+        if window % 2:
+            time_adjust_value = time_adjust_value - 1
+    
+        # Log the adjustment information
+        logger.debug(f'Adjusting time points by {time_adjust_value}')
+    
+        # Remove NaN points on either side introduced by rolling with min_periods
+        data_adjusted = data.isel(time=slice(time_adjust_value, -time_adjust_value))
+    
+        # Ensure the time coordinates match the adjusted data
+        # The default option is the middle
+        adjusted_time_length = len(data_adjusted.time.values)
+
+        time_slice = slice(0, adjusted_time_length)
+        new_time = data.time.values[time_slice]
+        data_adjusted['time'] = new_time
+    
+        return data_adjusted
 
 def allocate_data_for_noise_calculation(da:Optional[AnyXarray]=None, da_for_noise:Optional[AnyXarray]=None, 
                                         detrend_kwargs:Dict=dict(), detrend:bool=True, time_slice:Tuple[int]=None,
@@ -503,7 +549,6 @@ def multiwindow_signal_to_nosie_and_bounds(
     # if da_for_noise = control_da then the raw control da will be used.
     control_sn = multiwindow_signal_to_noise(da=control_da, da_for_noise=control_da, detrend=False, **sn_kwargs)
 
-#     chunks = LONGRUNMIP_CHUNKS if ('lat' in list(control_sn.coords) and 'lon' in list(control_sn.coords)) else {'time':-1}
 
     print('Persist')
     control_sn = control_sn.unify_chunks().persist()
