@@ -39,6 +39,7 @@ def polynomial_fit(y: ArrayLike, x:Optional[ArrayLike] = None, order:float=None,
     if number_nans_at_end > 0:  y = y[:-number_nans_at_end] # If number_nans_at_end is then this removes all values
     # If x is not provided, generate linearly increasing values
     x = np.arange(len(y)) if x is None else x
+    x = x[:len(y)]
     # Perform polynomial fit using numpy's polyfit function
     deg = order if order is not None else deg
     deg = 1 if deg is None else deg

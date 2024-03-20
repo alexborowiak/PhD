@@ -22,9 +22,9 @@ logger = utils.get_notebook_logger()
 
 def plot_histogram(da: listXarray, bins: Union[List[float], np.ndarray],
                    step: int, zec_vals: listXarray = None, bar_label: str = '', 
-                   line_label: str = '', bar_color: str = 'blue', line_color: str = 'red', ylabel_right:bool=False, 
+                   line_label: str = None, bar_color: str = 'blue', line_color: str = 'red', ylabel_right:bool=False, 
                    fig: Optional[plt.Figure] = None, axes: Optional[List[plt.Axes]] = None, xlim:float=None, ylim:float=0.3,
-                   add_legend: bool = False, xlabel:str=None, title_loc: str = 'regular', label_ensemble:bool=False,
+                   add_legend: bool = False, xlabel:str=None, title_loc: str = 'regular', label_ensemble:bool=False, return_fig_axes=False,
                   logginglevel='ERROR') -> Tuple[plt.Figure, List[plt.Axes]]:
     """
     Plot histograms for the given DataArray and models.
@@ -66,9 +66,12 @@ def plot_histogram(da: listXarray, bins: Union[List[float], np.ndarray],
                 index_values = [ind for ind in zec_vals.index.values if model in ind]
                 values = zec_vals.loc[index_values].values
                 ensembles = [ind.split('_')[-1] for ind in index_values]
-            for ensemble, zec_val in zip(ensembles, values):
                 
-                ax.axvline(zec_val, 0, 1, color=line_color, label=ensemble, linewidth=2)
+            for ensemble, zec_val in zip(ensembles, values):
+                if line_label is not None: label=line_label
+                else: label=ensemble
+                    
+                ax.axvline(zec_val, 0, 1, color=line_color, label=label, linewidth=2)
                 if label_ensemble:
                     ax.annotate(ensemble, xy=(zec_val+0.01 if zec_val>0 else zec_val-0.01, 0.19),
                                 size=6, va='top', ha='center', color=line_color, clip_on=False, rotation=90)
@@ -94,4 +97,4 @@ def plot_histogram(da: listXarray, bins: Union[List[float], np.ndarray],
         if add_legend and ax is axes[0]: ax.legend(loc='upper left')
         ax.grid(True, linestyle=':', alpha=0.2, color='grey')
 
-    return fig, axes
+    if return_fig_axes: return fig, axes

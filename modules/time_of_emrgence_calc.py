@@ -5,14 +5,30 @@ from typing import Optional, Callable, Union
 
 import xarray as xr
 import numpy as np
-from scipy.stats import kstest
-
+import dask.array as daskarray
+from scipy.stats import anderson_ksamp, ks_2samp,ttest_ind
+# from dask.array.stats import ttest_ind
 from numpy.typing import ArrayLike
 
 sys.path.append('../')
 import signal_to_noise as sn
 
-def return_kstest_pvalue(test_arr, base_arr):
+
+
+def return_ttest_pvalue(test_arr, base_arr):
+    """
+    Compute T-Test p-value between two arrays.
+
+    Parameters:
+        test_arr (ArrayLike): Array to test against base_arr.
+        base_arr (ArrayLike): Base array to compare against.
+
+    Returns:
+        float: T-Test p-value.
+    """
+    return ttest_ind(test_arr, base_arr, nan_policy='omit').pvalue
+
+def return_ks_pvalue(test_arr, base_arr):
     """
     Compute Kolmogorov-Smirnov test p-value between two arrays.
 
@@ -23,31 +39,59 @@ def return_kstest_pvalue(test_arr, base_arr):
     Returns:
         float: Kolmogorov-Smirnov test p-value.
     """
-    return kstest(test_arr, base_arr).pvalue
+    return ks_2samp(test_arr, base_arr).pvalue
 
-def kstest_with_ufunc(ds: xr.DataArray, window: int, base_period_ds: xr.DataArray) -> xr.DataArray:
+
+def return_anderson_pvalue(test_arr, base_arr):
     """
-    Apply Kolmogorov-Smirnov test using xarray's apply_ufunc.
+    Compute Anderson-Darling test p-value between two arrays.
 
     Parameters:
-        ds (xr.DataArray): Data to apply the test to.
+        test_arr (ArrayLike): Array to test against base_arr.
+        base_arr (ArrayLike): Base array to compare against.
+
+    Returns:
+        float: Anderson-Darling test p-value.
+    """
+    if all(np.isnan(test_arr)) or all(np.isnan(base_arr)): return np.nan
+    # print(test_arr.shape, base_arr.shape)
+    return anderson_ksamp([test_arr, base_arr]).pvalue
+
+TEST_NAME_MAPPING = {
+    return_ttest_pvalue:'ttest',
+    return_ks_pvalue: 'ks',
+    return_anderson_pvalue: 'anderson_darling'
+}
+
+def stats_test_with_ufunc(da: xr.DataArray, window: int, base_period_ds: xr.DataArray, statistic_func:Callable) -> xr.DataArray:
+    """
+    Apply statistical test using xarray's apply_ufunc.
+
+    Parameters:
+        da (xr.DataArray): Data to apply the test to.
         window (int): Size of the rolling window for the test.
         base_period_ds (xr.DataArray): Base period data for comparison.
+        statistic_func (Callable): Statistical function to use.
 
     Returns:
         xr.DataArray: DataArray containing the p-values.
     """
-    return xr.apply_ufunc(
-        return_kstest_pvalue,
-        ds.rolling(time=window).construct('window_dim')[(window-1):],
+
+    assert isinstance(da, xr.DataArray)
+    output_da = xr.apply_ufunc(
+        statistic_func,
+        da.rolling(time=window).construct('window_dim')[(window-1):],
         base_period_ds.rename({'time':'window_dim'}),
         input_core_dims=[['window_dim'], ['window_dim']],
         exclude_dims={'window_dim'},
         vectorize=True,
-        dask='parallelized'
+        dask='parallelized'#''
     )
+    output_da.attrs = {'longname': TEST_NAME_MAPPING.get(statistic_func, 'p-value')}
+    return output_da
 
-def kstest_1d_array(arr: ArrayLike, window: int, base_period_length: int = 50) -> ArrayLike:
+
+def stats_test_1d_array(arr, stats_func:Callable, window: int=20, base_period_length:int = 50):
     """
     Apply Kolmogorov-Smirnov test along a 1D array.
 
@@ -61,43 +105,85 @@ def kstest_1d_array(arr: ArrayLike, window: int, base_period_length: int = 50) -
     """
     # The data to use for the base period
     base_list = arr[:base_period_length]
-    # Fill function with base data - this needs to be done each time as the base period is unique
-    kstest_partial = partial(kstest, base_list)
     # Stop when there are not enough points left
     number_iterations = arr.shape[0] - window
-    kstest_array = np.zeros(number_iterations)
-    for t in np.arange(number_iterations):
-        arr_subset = arr[t:t+window]
-        ks_value = kstest_partial(arr_subset).pvalue
-        kstest_array[t] = ks_value
-    return kstest_array
-
-def apply_kstest_along_array(ds: xr.DataArray, window: int, base_period_length: int = 50) -> xr.DataArray:
-    """
-    Apply Kolmogorov-Smirnov test along a 2D xarray.DataArray.
-
-    Parameters:
-        ds (xr.DataArray): DataArray to apply the test to.
-        window (int): Size of the rolling window for the test.
-        base_period_length (int, optional): Length of the base period. Defaults to 50.
-
-    Returns:
-        xr.DataArray: DataArray containing the p-values.
-    """
-    local_ks_np = np.apply_along_axis(
-        kstest_1d_array,
-        ds.get_axis_num('time'),
-        ds.to_numpy(),
-        window,
-        base_period_length
-    )
-
-    time_axis_num = ds.get_axis_num('time')
-    local_ks_ds = xr.zeros_like(ds.isel(time=slice(0, local_ks_np.shape[time_axis_num])))
+    pval_array = np.zeros(number_iterations)
     
-    local_ks_ds += local_ks_np
+    for t in np.arange(number_iterations):
+        arr_subset = arr[t: t+window]
+        p_value = stats_func(base_list, arr_subset) # return_ttest_pvalue
+        pval_array[t] = p_value
 
-    return local_ks_ds
+    # TODO: This could be done in the apply_ufunc
+    lenghth_diff = arr.shape[0] - pval_array.shape[0]
+    pval_array = np.append(pval_array, np.array([np.nan] *lenghth_diff))
+    return pval_array 
+
+
+# def stats_test_1d_array(arr: ArrayLike, window: int, stats_test:Callable,
+#                     base_period_length:int = 50) -> ArrayLike:
+#     """
+#     Apply Kolmogorov-Smirnov test along a 1D array.
+
+#     Parameters:
+#         arr (ArrayLike): 1D array to apply the test to.
+#         window (int): Size of the rolling window for the test.
+#         base_period_length (int, optional): Length of the base period. Defaults to 50.
+
+#     Returns:
+#         ArrayLike: Array of p-values.
+#     """
+#     # The data to use for the base period
+#     base_list = arr[:base_period_length]
+#     # Fill function with base data - this needs to be done each time as the base period is unique
+#     stats_test_partial = partial(return_ttest_pvalue, base_list) #statstest
+#     # Stop when there are not enough points left
+#     number_iterations = arr.shape[0] - window
+#     #print(number_iterations)
+#     kstest_array = np.zeros(number_iterations)
+#     for t in np.arange(number_iterations):
+#         arr_subset = arr[t:t+window]
+#         ks_value = stats_test_partial(arr_subset)#.pvalue
+#         #if isinstance(ks_value, (list, np.ndarray)):
+#         #   ks_value = ks_value[0]  # Taking the first element
+#         #print(ks_value)
+#         kstest_array[t] = ks_value
+#     return kstest_array
+
+# def apply_stats_test_along_array(ds: xr.DataArray, window: int, stats_test:Callable, 
+#                                  base_period_length: int = 50, 
+#                                 ) -> xr.DataArray:
+#     """
+#     Apply Kolmogorov-Smirnov test along a 2D xarray.DataArray.
+
+#     Parameters:
+#         ds (xr.DataArray): DataArray to apply the test to.
+#         window (int): Size of the rolling window for the test.
+#         base_period_length (int, optional): Length of the base period. Defaults to 50.
+
+#     Returns:
+#         xr.DataArray: DataArray containing the p-values.
+#     """
+#     stats_test_1d_array_partial = partial(
+#         stats_test_1d_array,
+#         stats_test=stats_test,
+#         window=window,
+#         base_period_length=base_period_length)
+
+#     ds_data = ds.data
+#     time_axis_num = ds.get_axis_num('time')
+#     local_ks_np = np.apply_along_axis(
+#         stats_test_1d_array_partial, 
+#         time_axis_num,
+#         ds.data,
+#     )
+
+#     time_axis_num = ds.get_axis_num('time')
+#     local_ks_ds = xr.zeros_like(ds.isel(time=slice(0, local_ks_np.shape[time_axis_num])))
+    
+#     local_ks_ds += local_ks_np
+
+#     return local_ks_ds
 
 
 def get_exceedance_arg(arr, time, threshold, comparison_func):
@@ -156,8 +242,8 @@ def get_exceedance_arg(arr, time, threshold, comparison_func):
 
     return first_exceedance
 
-def get_permanent_exceedance(ds: xr.DataArray, threshold: Union[int, float], comparison_func: Callable, time: Optional[xr.DataArray] = None
-                            )-> xr.DataArray:
+def get_permanent_exceedance(ds: xr.DataArray, threshold: Union[int, float], comparison_func: Callable,
+                             time: Optional[xr.DataArray] = None)-> xr.DataArray:
     """
     Calculate the time of the first permanent exceedance for each point in a DataArray.
 
@@ -196,3 +282,92 @@ def get_permanent_exceedance(ds: xr.DataArray, threshold: Union[int, float], com
         ds, 
         **exceedance_dict
     )
+
+def create_exceedance_single_point_dict(toe_ds, timeseries_ds):
+    """
+    Creates a dictionary with year, corresponding datetime, and value from two datasets.
+
+    Parameters:
+        toe_ds (xarray.Dataset): Dataset containing a single value representing a year.
+        timeseries_ds (xarray.Dataset): Dataset containing a time series.
+
+    Returns:
+        dict: A dictionary with keys 'year', 'year_datetime', and 'val'.
+
+    Note:
+        This function assumes both datasets are xarray Datasets.
+
+    Example:
+        create_exceedance_single_point_dict(toe_dataset, timeseries_dataset)
+    """
+    
+    # Extract the year from toe_ds values
+    year = toe_ds.values
+    
+    # Find the datetime corresponding to the extracted year in timeseries_ds
+    year_datetime = timeseries_ds.sel(time=timeseries_ds.time.dt.year==int(year)).time.values[0]
+    
+    # Find the value corresponding to the extracted year in timeseries_ds
+    val = timeseries_ds.sel(time=timeseries_ds.time.dt.year==int(year)).values[0]
+    
+    # Create and return the dictionary
+    return {
+        'year': year,
+        'year_datetime': year_datetime,
+        'val': val
+    }
+
+
+# def return_statistic_func_pvalue(statistic_func, test_arr, base_arr):
+#     if statistic_func == anderson_ksamp: statistic_func = statistic_func([base_arr, test_arr])
+#     else:  statistic_func = statistic_func(base_arr, test_arr)
+#     return statistic_func.pvalue
+
+# ttest_ind_partial = partial(toe.return_statistic_func_pvalue, statistic_func=ttest_ind)
+# anderson_ksamp_partial = partial(toe.return_statistic_func_pvalue, statistic_func=anderson_ksamp)
+# ks_2samp_ind_partial = partial(toe.return_statistic_func_pvalue, statistic_func=ks_2samp)
+
+
+
+# from scipy.stats import ttest_ind
+
+# def return_ttest_pvalue(test_arr, base_arr):
+#     """
+#     Compute T-Test p-value between two arrays.
+
+#     Parameters:
+#         test_arr (ArrayLike): Array to test against base_arr.
+#         base_arr (ArrayLike): Base array to compare against.
+
+#     Returns:
+#         float: T-Test p-value.
+#     """
+#     return ttest_ind(test_arr, base_arr, nan_policy='omit').pvalue
+
+# def stats_test_1d_array(arr, window: int=20, base_period_length:int = 50):
+#     """
+#     Apply Kolmogorov-Smirnov test along a 1D array.
+
+#     Parameters:
+#         arr (ArrayLike): 1D array to apply the test to.
+#         window (int): Size of the rolling window for the test.
+#         base_period_length (int, optional): Length of the base period. Defaults to 50.
+
+#     Returns:
+#         ArrayLike: Array of p-values.
+#     """
+#     # The data to use for the base period
+#     base_list = arr[:base_period_length]
+#     # Stop when there are not enough points left
+#     number_iterations = arr.shape[0] - window
+#     pval_array = np.zeros(number_iterations)
+    
+#     for t in np.arange(number_iterations):
+#         arr_subset = arr[t: t+window]
+#         p_value = return_ttest_pvalue(base_list, arr_subset)
+#         pval_array[t] = p_value
+
+#     # TODO: This could be done in the apply_ufunc
+#     lenghth_diff = arr.shape[0] - pval_array.shape[0]
+#     pval_array = np.append(pval_array, np.array([np.nan] *lenghth_diff))
+#     return pval_array 

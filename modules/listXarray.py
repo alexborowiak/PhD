@@ -4,7 +4,8 @@ import json
 import numpy as np
 import pandas as pd
 import xarray as xr
-from typing import List, Callable, Union, Dict
+from typing import List, Callable, Union, Dict, Optional
+from numpy.typing import ArrayLike
 
 import utils
 import xarray_extender
@@ -12,7 +13,7 @@ import xarray_extender
 logger = utils.get_notebook_logger()
 
 class listXarray():
-    def __init__(self, xr_list: List, key_dim:List[str]=None, logginglevel:str='ERROR') -> None:
+    def __init__(self, xr_list:List, key_dim:List[str]=None, refkeys:Optional[ArrayLike]=None, logginglevel:str='ERROR') -> None:
         """
         Initialize the listXarray object.
         Parameters:
@@ -28,19 +29,23 @@ class listXarray():
         
         logger.info(self.key_dim)
         logger.debug(self.xr_list)
-        
-        if key_dim:
-            try:
-                self.refkeys = np.array([ds[key_dim].values[0] for ds in xr_list])
-            except IndexError:
-                # Potential that the model values aren't stored as numpy arrays.
-                self.refkeys = np.array([str(ds[key_dim].values) for ds in xr_list])
+
+        if refkeys is None: # Only try this if not manually setting refkeys
+            if key_dim:
+                try:
+                    self.refkeys = np.array([ds[key_dim].values[0] for ds in xr_list])
+                except IndexError:
+                    # Potential that the model values aren't stored as numpy arrays.
+                    self.refkeys = np.array([str(ds[key_dim].values) for ds in xr_list])
+            else:
+                self.refkeys = None
         else:
-            self.refkeys = None
+            # Refkeys have been manually assigned
+            self.refkeys = refkeys
             
         logger.info(self.refkeys)
 
-    def set_refkeys(self, key_dim, logginglevel:str='ERROR'):
+    def set_refkeys(self, key_dim, refkeys=None, logginglevel:str='ERROR'):
         """
         Set new key dimensions for the listXarray.
         Parameters:
@@ -48,7 +53,7 @@ class listXarray():
         Returns:
             listXarray: A new instance of listXarray with the updated key dimensions.
         """
-        return listXarray(self.xr_list, key_dim, logginglevel)
+        return listXarray(self.xr_list, key_dim, refkeys=None, logginglevel='ERROR')
     
     def sort_by_refkey(self):
         '''
@@ -124,31 +129,40 @@ class listXarray():
         string += f'Number of da/ds: {str(len(self.xr_list))}\n---------------\n'
         active_key_dim = f'key_dim = {self.key_dim}' if type(self.key_dim) is not type(None) else 'key_dim = None'
         print(active_key_dim)
-        for da in self.xr_list:
-            if isinstance(da, (xr.Dataset, xr.DataArray)):
-                if 'model' in da.coords:
-                    model_name = str(da.model.values)
-                    string += model_name + (16-len(model_name)) * ' '
+        longest_key = np.max(list(map(len, self.refkeys)))
+        for refkey, da in zip(self.refkeys, self.xr_list):
+            # if isinstance(da, (xr.Dataset, xr.DataArray)):
+            #     if 'model' in da.coords:
+            #         model_name = str(da.model.values)
+            #         string += model_name + (16-len(model_name)) * ' '
+            string += refkey + (longest_key-len(refkey)) * ' '
             string += str(da.sizes).replace('Frozen', '')
             string += '\n'
         return string
 
-    def to_dict(self) -> Dict:
+    def to_dict(self, logginglevel='ERROR') -> Dict:
         """
         Convert the data to a nested dictionary.
     
         :return: A nested dictionary representation of the data.
         """
+
+        utils.change_logginglevel(logginglevel)
         result_dict = {}
     
         for key, ds in self:
+            logger.info(key)
             key_dict = {}
             for coord in ds.coords:
                 coord_dict = {}
                 coord_values = ds[coord].values
+                logger.debug(coord_values)
                 for coord_val in coord_values:
                     coord_val_data = ds.sel(**{coord: coord_val}).values
-                    if coord_val_data.ndim < 2:
+                    logger.debug(coord_val_data.ndim)
+                    if coord_val_data.ndim == 0:
+                        pass
+                    elif coord_val_data.ndim < 2:
                         coord_val_data = coord_val_data[0]
                     coord_dict[coord_val] = coord_val_data
     
@@ -168,6 +182,10 @@ class listXarray():
         """
         result_dict = {}
 
+        # All are shape of 1
+        if all([ds.shape == (1,)for key, ds in self]):
+            return {key: float(ds.values) for key, ds in self}
+            
         for key, ds in self:
             for coord in ds.coords:
                 coord_values = ds[coord].values
@@ -464,6 +482,44 @@ class listXarray():
             List[xr.DataArray]: The list of xarray DataArrays.
         """
         return self.xr_list
+    def merge_dim_to_refkey(self, dim_to_remove: str, logginglevel='ERROR'):
+        """
+        Merge a specified dimension into the reference keys, creating new reference keys
+        based on the removed dimension's values.
+    
+        Parameters:
+            dim_to_remove (str): The name of the dimension to merge into reference keys.
+            logginglevel (str): Logging level for messages (default is 'ERROR').
+    
+        Returns:
+            listXarray: A new listXarray object with merged dimensions in reference keys.
+        """
+        
+        # Initialize empty lists to store new Xarray objects and corresponding reference keys
+        new_xr_list = []
+        new_refkey_list = []
+        
+        # Iterate over each reference key
+        for refkey in self.refkeys:
+            # Get the Xarray object for the current reference key
+            da = self[refkey]
+            
+            # Get the values of the dimension to remove from the current Xarray object
+            da_remove_dims_vals = da[dim_to_remove].values
+        
+            # Iterate over each value of the dimension to remove
+            for dtr in da_remove_dims_vals:
+                # Create a subset of the Xarray object with only the current dimension value
+                da_sub = da.loc[{dim_to_remove: dtr}]
+                
+                # Append the subset to the list of new Xarray objects
+                new_xr_list.append(da_sub)
+                
+                # Create a new reference key by appending the current dimension value to the original reference key
+                new_refkey_list.append(f'{refkey}_{dtr}')
+        
+        # Create a new listXarray object with the merged dimensions in reference keys
+        return listXarray(new_xr_list, refkeys=new_refkey_list, key_dim=self.key_dim)
     
     def squeeze(self, *args, **kwargs):
         """
@@ -861,12 +917,18 @@ def read_listxarray(fname, *args, **kwargs):
     - An instance of listXarray with loaded data and key dimension information.
     """
     # Load key dimension information from the JSON file
+    if 'logginglevel' in kwargs:
+        logginglevel=kwargs['logginglevel']
+        utils.change_logginglevel(logginglevel)
+        kwargs.pop('logginglevel')
     with open(os.path.join(fname, 'key_dim_info.json'), 'r') as f:
         key_dim_info = json.load(f)
+        logger.info(key_dim_info)
 
     # Load individual NetCDF files
     xr_list = []
     for indiv_fname in key_dim_info['datasets']:
+        logger.debug(indiv_fname)
         ds = xr.open_dataset(os.path.join(fname, f'{indiv_fname}.nc'), *args, **kwargs)
         xr_list.append(ds)
 
