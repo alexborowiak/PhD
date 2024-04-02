@@ -1,7 +1,7 @@
 import os, sys
 from functools import partial
 from itertools import groupby
-from typing import Optional, Callable, Union
+from typing import Optional, Callable, Union, Tuple
 
 import xarray as xr
 import numpy as np
@@ -57,43 +57,11 @@ def return_anderson_pvalue(test_arr, base_arr):
     # print(test_arr.shape, base_arr.shape)
     return anderson_ksamp([test_arr, base_arr]).pvalue
 
-TEST_NAME_MAPPING = {
-    return_ttest_pvalue:'ttest',
-    return_ks_pvalue: 'ks',
-    return_anderson_pvalue: 'anderson_darling'
-}
-
-def stats_test_with_ufunc(da: xr.DataArray, window: int, base_period_ds: xr.DataArray, statistic_func:Callable) -> xr.DataArray:
-    """
-    Apply statistical test using xarray's apply_ufunc.
-
-    Parameters:
-        da (xr.DataArray): Data to apply the test to.
-        window (int): Size of the rolling window for the test.
-        base_period_ds (xr.DataArray): Base period data for comparison.
-        statistic_func (Callable): Statistical function to use.
-
-    Returns:
-        xr.DataArray: DataArray containing the p-values.
-    """
-
-    assert isinstance(da, xr.DataArray)
-    output_da = xr.apply_ufunc(
-        statistic_func,
-        da.rolling(time=window).construct('window_dim')[(window-1):],
-        base_period_ds.rename({'time':'window_dim'}),
-        input_core_dims=[['window_dim'], ['window_dim']],
-        exclude_dims={'window_dim'},
-        vectorize=True,
-        dask='parallelized'#''
-    )
-    output_da.attrs = {'longname': TEST_NAME_MAPPING.get(statistic_func, 'p-value')}
-    return output_da
 
 
 def stats_test_1d_array(arr, stats_func:Callable, window: int=20, base_period_length:int = 50):
     """
-    Apply Kolmogorov-Smirnov test along a 1D array.
+    Apply stats_func test along a 1D array.
 
     Parameters:
         arr (ArrayLike): 1D array to apply the test to.
@@ -120,71 +88,79 @@ def stats_test_1d_array(arr, stats_func:Callable, window: int=20, base_period_le
     return pval_array 
 
 
-# def stats_test_1d_array(arr: ArrayLike, window: int, stats_test:Callable,
-#                     base_period_length:int = 50) -> ArrayLike:
-#     """
-#     Apply Kolmogorov-Smirnov test along a 1D array.
 
-#     Parameters:
-#         arr (ArrayLike): 1D array to apply the test to.
-#         window (int): Size of the rolling window for the test.
-#         base_period_length (int, optional): Length of the base period. Defaults to 50.
+def return_hawkins_signal_and_noise(lt: ArrayLike, gt: ArrayLike, return_reconstruction:bool=False) -> Tuple[ArrayLike, ArrayLike]:
+    """
+    Calculate the signal and noise using the Hawkins method.
 
-#     Returns:
-#         ArrayLike: Array of p-values.
-#     """
-#     # The data to use for the base period
-#     base_list = arr[:base_period_length]
-#     # Fill function with base data - this needs to be done each time as the base period is unique
-#     stats_test_partial = partial(return_ttest_pvalue, base_list) #statstest
-#     # Stop when there are not enough points left
-#     number_iterations = arr.shape[0] - window
-#     #print(number_iterations)
-#     kstest_array = np.zeros(number_iterations)
-#     for t in np.arange(number_iterations):
-#         arr_subset = arr[t:t+window]
-#         ks_value = stats_test_partial(arr_subset)#.pvalue
-#         #if isinstance(ks_value, (list, np.ndarray)):
-#         #   ks_value = ks_value[0]  # Taking the first element
-#         #print(ks_value)
-#         kstest_array[t] = ks_value
-#     return kstest_array
+    Parameters:
+        lt (ArrayLike): Time series data to be filtered.
+        gt (ArrayLike): Time series used as the reference for filtering.
+        return_reconstruction (Tuple) = False:
+            Returns the reconstruction of the local time series.
+            This is optional, as the reconstruction series is only needed for verification purposes                                   
 
-# def apply_stats_test_along_array(ds: xr.DataArray, window: int, stats_test:Callable, 
-#                                  base_period_length: int = 50, 
-#                                 ) -> xr.DataArray:
-#     """
-#     Apply Kolmogorov-Smirnov test along a 2D xarray.DataArray.
+    Returns:
+        Tuple[ArrayLike, ArrayLike]: A tuple containing the filtered signal and noise.
 
-#     Parameters:
-#         ds (xr.DataArray): DataArray to apply the test to.
-#         window (int): Size of the rolling window for the test.
-#         base_period_length (int, optional): Length of the base period. Defaults to 50.
+    If either `lt` or `gt` contains all NaN values, it returns `lt` as both the signal and noise.
 
-#     Returns:
-#         xr.DataArray: DataArray containing the p-values.
-#     """
-#     stats_test_1d_array_partial = partial(
-#         stats_test_1d_array,
-#         stats_test=stats_test,
-#         window=window,
-#         base_period_length=base_period_length)
+    The Hawkins method removes NaNs from the start and end of `lt` and `gt` to align the series.
+    It then calculates the gradient `grad` and y-intercept `yint` of the linear fit between `gt` and `lt`.
+    The signal is calculated as `signal = grad * gt`.
+    The noise is calculated as the difference between `lt` and `signal`.
 
-#     ds_data = ds.data
-#     time_axis_num = ds.get_axis_num('time')
-#     local_ks_np = np.apply_along_axis(
-#         stats_test_1d_array_partial, 
-#         time_axis_num,
-#         ds.data,
-#     )
+    NaN values are padded back to the filtered signal and noise arrays to match the original input length.
+    """
 
-#     time_axis_num = ds.get_axis_num('time')
-#     local_ks_ds = xr.zeros_like(ds.isel(time=slice(0, local_ks_np.shape[time_axis_num])))
+    if np.all(np.isnan(lt)) or np.all(np.isnan(gt)):
+        # If either series is all NaN, return lt as both signal and noise
+        return lt, lt
+
+    # If either is nan we want to drop
+    nan_locs = np.isnan(lt)#  | np.isnan(gt)
+
+    lt_no_nan = lt[~nan_locs]
+    gt_no_nan = gt[~nan_locs]
+
+    # Calculate the gradient and y-intercept
+    grad, yint = np.polyfit(gt_no_nan, lt_no_nan, deg=1)
+
+    # Calculate signal and noise
+    signal = grad * gt_no_nan
+    noise = lt_no_nan - signal
+
+    signal_to_return = np.empty_like(gt)
+    noise_to_return = np.empty_like(lt)
     
-#     local_ks_ds += local_ks_np
+    signal_to_return.fill(np.nan)
+    noise_to_return.fill(np.nan)
 
-#     return local_ks_ds
+    signal_to_return[~nan_locs] = signal
+    noise_to_return[~nan_locs] = noise
 
+    
+    if return_reconstruction:
+        reconstructed_lt = grad * gt + yint
+        return signal_to_return, noise_to_return, reconstructed_lt
+    return signal_to_return, noise_to_return
+
+    # # Pad NaNs back to the filtered signal and noise arrays
+    # signal = np.concatenate([[np.nan] * number_nans_at_start, signal, [np.nan] * number_nans_at_end])
+    # noise = np.concatenate([[np.nan] * number_nans_at_start, noise, [np.nan] * number_nans_at_end])
+
+    # # Find the number of NaNs at the start and end of lt
+    # number_nans_at_start = np.where(~np.isnan(lt))[0][0]
+    # number_nans_at_end = np.where(~np.isnan(lt[::-1]))[0][0]
+
+    # # Remove start NaNs
+    # lt = lt[number_nans_at_start:]
+    # gt = gt[number_nans_at_start:]
+
+    # # Remove end NaNs if there are any
+    # if number_nans_at_end > 0:
+    #     lt = lt[:-number_nans_at_end]
+    #     gt = gt[:-number_nans_at_end]
 
 def get_exceedance_arg(arr, time, threshold, comparison_func):
     """
@@ -317,6 +293,41 @@ def create_exceedance_single_point_dict(toe_ds, timeseries_ds):
         'val': val
     }
 
+
+# TEST_NAME_MAPPING = {
+#     return_ttest_pvalue:'ttest',
+#     return_ks_pvalue: 'ks',
+#     return_anderson_pvalue: 'anderson_darling'
+# }
+
+
+    
+# def stats_test_with_ufunc(da: xr.DataArray, window: int, base_period_ds: xr.DataArray, statistic_func:Callable) -> xr.DataArray:
+#     """
+#     Apply statistical test using xarray's apply_ufunc.
+
+#     Parameters:
+#         da (xr.DataArray): Data to apply the test to.
+#         window (int): Size of the rolling window for the test.
+#         base_period_ds (xr.DataArray): Base period data for comparison.
+#         statistic_func (Callable): Statistical function to use.
+
+#     Returns:
+#         xr.DataArray: DataArray containing the p-values.
+#     """
+
+#     assert isinstance(da, xr.DataArray)
+#     output_da = xr.apply_ufunc(
+#         statistic_func,
+#         da.rolling(time=window).construct('window_dim')[(window-1):],
+#         base_period_ds.rename({'time':'window_dim'}),
+#         input_core_dims=[['window_dim'], ['window_dim']],
+#         exclude_dims={'window_dim'},
+#         vectorize=True,
+#         dask='parallelized'#''
+#     )
+#     output_da.attrs = {'longname': TEST_NAME_MAPPING.get(statistic_func, 'p-value')}
+#     return output_da
 
 # def return_statistic_func_pvalue(statistic_func, test_arr, base_arr):
 #     if statistic_func == anderson_ksamp: statistic_func = statistic_func([base_arr, test_arr])

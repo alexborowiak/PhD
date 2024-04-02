@@ -8,7 +8,7 @@ import utils
 import statsmodels.api as sm 
 lowess = sm.nonparametric.lowess
 
-
+from typing import Literal
 from numpy.typing import ArrayLike
 from typing import Optional, Dict, Callable
 
@@ -16,7 +16,8 @@ from typing import Optional, Dict, Callable
 logger = utils.get_notebook_logger()
 
     
-def polynomial_fit(y: ArrayLike, x:Optional[ArrayLike] = None, order:float=None, deg:float=None) -> ArrayLike:
+def polynomial_fit(y: ArrayLike, x:Optional[ArrayLike] = None, order:float=None, deg:float=None, 
+                  nan_removal: Literal['all', 'endpoints'] = 'endpoints') -> ArrayLike:
     """
     Perform a polynomial fit for line y using the Vandermonde matrix method.
     
@@ -30,16 +31,22 @@ def polynomial_fit(y: ArrayLike, x:Optional[ArrayLike] = None, order:float=None,
         ArrayLike: The fitted line.
     """
     if all(np.isnan(y)): return y # All values are nan, don't proceed
-    # First need to deal with any nan values at the start or the end
-    number_nans_at_start = np.where(~np.isnan(y))[0][0]
-    number_nans_at_end = np.where(~np.isnan(y[::-1]))[0][0]
 
-    # Remove these nans
-    y = y[number_nans_at_start:] # Remove start nans
-    if number_nans_at_end > 0:  y = y[:-number_nans_at_end] # If number_nans_at_end is then this removes all values
-    # If x is not provided, generate linearly increasing values
-    x = np.arange(len(y)) if x is None else x
-    x = x[:len(y)]
+
+    if nan_removal == 'endpoints':
+        # First need to deal with any nan values at the start or the end
+        number_nans_at_start = np.where(~np.isnan(y))[0][0]
+        number_nans_at_end = np.where(~np.isnan(y[::-1]))[0][0]
+        # Remove these nans
+        y = y[number_nans_at_start:] # Remove start nans
+        if number_nans_at_end > 0:  y = y[:-number_nans_at_end] # If number_nans_at_end is then this removes all values
+        # If x is not provided, generate linearly increasing values
+        x = np.arange(len(y)) if x is None else x
+        x = x[:len(y)]
+    if nan_removal == 'all':
+        nan_locs = np.isfinte(y) * np.isfinite(x)
+        x = x[nan_locs]
+        y = y[nan_locs]
     # Perform polynomial fit using numpy's polyfit function
     deg = order if order is not None else deg
     deg = 1 if deg is None else deg
