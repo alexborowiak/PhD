@@ -76,38 +76,7 @@ VARIABLE_INFO = variables = {
 LONGRUNMIP_MODELS = ['ccsm3', 'cnrmcm61', 'hadcm3l', 'ipslcm5a', 'mpiesm11', 'mpiesm12']
 
 
-# ZECMIP_MODEL_PARAMS = {
-#      'NorESM2-LM':     {'ECS': 2.54, 'color': [0.2298057, 0.29871797, 0.75368315, 1.0]},
-#      'MIROC-ES2L':     {'ECS': 2.7,  'color': [0.38301334, 0.50941904, 0.91738782, 1.0]},
-#      'MPI-ESM1-2-LR':  {'ECS': 2.83, 'color': [0.55295316, 0.68892933, 0.99537561, 1.0]},
-#      'GISS-E2-1-G-CC': {'ECS': 2.9,  'color': [0.72219329, 0.81395274, 0.97657471, 1.0]},
-#      'GFDL-ESM4':      {'ECS': 3.1,  'color': [0.8653952, 0.86541021, 0.86539556, 1.0]},
-#      'ACCESS-ESM1-5':  {'ECS': 3.87, 'color': [0.95885295, 0.76976775, 0.67800794, 1.0]},
-#      'CESM2':          {'ECS': 5.1,  'color': [0.95800306, 0.60284243, 0.48177591, 1.0]},
-#      'UKESM1-0-LL':    {'ECS': 5.4,  'color': [0.86918685, 0.37831309, 0.30026718, 1.0]},
-#      'CanESM5':        {'ECS': 5.7,  'color': [0.70567316, 0.01555616, 0.15023281, 1.0]}
-# }
 
-# This has been generated in zecmip_stabilitiy_global_(single_ensemble).ipynb
-# ZECMIP_MODEL_PARAMS = {
-#     'GISS-E2-1-G-CC': {'value': -0.09,
-#   'color': np.array([0.30196078, 0.        , 0.29411765, 1.        ])},
-#  'CanESM5': {'value': -0.101,
-#   'color': np.array([0.50588235, 0.05882353, 0.48627451, 1.        ])},
-#  'MIROC-ES2L': {'value': -0.108,
-#   'color': np.array([0.53333333, 0.25490196, 0.61568627, 1.        ])},
-#  'GFDL-ESM4': {'value': -0.204,
-#   'color': np.array([0.54901961, 0.41960784, 0.69411765, 1.        ])},
-#  'MPI-ESM1-2-LR': {'value': -0.27,
-#   'color':np. array([0.54901961, 0.58823529, 0.77647059, 1.        ])},
-#  'CESM2': {'value': -0.31,
-#   'color': np.array([0.61960784, 0.7372549 , 0.85490196, 1.        ])},
-#  'NorESM2-LM': {'value': -0.333,
-#   'color': np.array([0.74901961, 0.82745098, 0.90196078, 1.        ])},
-#  'ACCESS-ESM1-5': {'value': 0.011,
-#   'color': np.array([0.99137255, 0.6972549 , 0.48392157, 1.        ])},
-#  'UKESM1-0-LL': {'value': 0.288,
-#   'color': np.array([0.78666667, 0.11294118, 0.07294118, 1.        ])}}
 
 # NOTE: this comes from zecmip_stability_global_(single_ensemble).ipynb
 ZECMIP_MODEL_PARAMS = {'GISS-E2-1-G-CC': {'value': -0.09, 'color': '#add8e6', 'linestyle': '-'},
@@ -124,17 +93,6 @@ ZECMIP_MODEL_PARAMS = {'GISS-E2-1-G-CC': {'value': -0.09, 'color': '#add8e6', 'l
 
 
 
-# ZECMIP_MODEL_PARAMS = {
-#      'NorESM2-LM':     {'ECS': 2.54, 'color': '#FDE5A2'},
-#      'MIROC-ES2L':     {'ECS': 2.7,  'color': '#FCD275'},
-#      'MPI-ESM1-2-LR':  {'ECS': 2.83, 'color': '#F9AD28'},
-#      'GISS-E2-1-G-CC': {'ECS': 2.9,  'color': '#F77D43'}, # ECS value needs revision
-#      'GFDL-ESM4':      {'ECS': 3.1,  'color': '#F65D3E'},
-#      'ACCESS-ESM1-5':  {'ECS': 3.87, 'color': '#F54F49'}, # https://www.publish.csiro.au/es/pdf/ES19035
-#      'CESM2':          {'ECS': 5.1,  'color': '#F7808E'},
-#      'UKESM1-0-LL':    {'ECS': 5.4,  'color': '#A40601'},
-#      'CanESM5':        {'ECS': 5.7,  'color': '#7F0300'}
-# }
 
 
 
