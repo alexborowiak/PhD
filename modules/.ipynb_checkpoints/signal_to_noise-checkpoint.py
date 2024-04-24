@@ -7,6 +7,8 @@ TODOL which should either be moved to antoher module, or the name of
 this package module should perhaps be renamed.
 
 '''
+
+# Import inbuilt Python modules
 import os, sys
 import inspect
 import itertools
@@ -15,20 +17,19 @@ from functools import partial
 from typing import Optional, Union, Dict, Tuple, List, Callable
 from numpy.typing import ArrayLike
 
+# Import 3rd party packages
 import numpy as np
 import pandas as pd
 import xarray as xr
+
+# Import my packages
 sys.path.append('../')
-
 import xarray_extender as xe
-
 import xarray_class_accessors as xca
 import utils
 from sn_typing import AnyXarray
-
 import classes
 import stats
-
 
 logger = utils.get_notebook_logger()
 
@@ -387,7 +388,8 @@ def signal_to_noise(window:int, da:xr.DataArray, da_for_noise:Optional[xr.DataAr
         logginglevel=logginglevel)
     
     
-    noise_da = noise(da_for_noise=da_for_noise, window=window, rolling_noise=rolling_noise, center=center, logginglevel=logginglevel)
+    noise_da = noise(da_for_noise=da_for_noise, window=window, rolling_noise=rolling_noise, center=center,
+                     logginglevel=logginglevel)
     logger.info('Calculating signal to noise')
     
     sn_da = signal_da/noise_da

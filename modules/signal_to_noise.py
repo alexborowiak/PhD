@@ -388,7 +388,8 @@ def signal_to_noise(window:int, da:xr.DataArray, da_for_noise:Optional[xr.DataAr
         logginglevel=logginglevel)
     
     
-    noise_da = noise(da_for_noise=da_for_noise, window=window, rolling_noise=rolling_noise, center=center, logginglevel=logginglevel)
+    noise_da = noise(da_for_noise=da_for_noise, window=window, rolling_noise=rolling_noise, center=center,
+                     logginglevel=logginglevel)
     logger.info('Calculating signal to noise')
     
     sn_da = signal_da/noise_da

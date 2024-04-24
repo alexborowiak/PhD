@@ -1,11 +1,13 @@
 import os
-import logging, sys
+import sys
 import cftime
 
 import numpy as np
 import xarray as xr
 
 from typing import List, Union
+
+import logging
 logging.basicConfig(format="- %(message)s", filemode='w', stream=sys.stdout)
 logger = logging.getLogger()
 
